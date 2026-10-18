@@ -5,11 +5,13 @@ use std::{io::Write, mem::transmute, net::{IpAddr, Ipv4Addr, SocketAddr}, slice:
 use etherparse::{IpHeaders, IpNumber, IpPayloadSlice, Ipv4Extensions, Ipv4Header, NetHeaders, NetSlice, PacketBuilder, PacketHeaders, SlicedPacket, TcpHeader, TcpSlice, TransportSlice::Tcp,};
 use nfq::{Message, Queue, Verdict};
 use sudo::check;
+use pcore::{Decode, decoder::{self, Decoder, VarInt}};
 use tracing::{error, info};
 
-use crate::buffer::BigBuffer;
+use crate::{buffer::BigBuffer, packets::{Side, c2s, parser}};
 
 mod buffer;
+mod packets;
 
 pub const IP_HEADER_LEN: usize = 20;
 const SPOOF_WITH: &'static [u8] = b"123456789012345678901";
@@ -19,14 +21,11 @@ const LOCAL_HOST: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 
 async fn main() {
     tracing_subscriber::fmt::init();
     sudo::escalate_if_needed().expect("Failed to get SuperUser");
-    let mut buffer = BigBuffer::new();
+    
     let mut queue = Queue::open().unwrap();
+    let mut parser = parser::Parser::new();
     queue.bind(1).unwrap();
-    let mut i = 0;
     loop {
-        if i == 10 {
-            return;
-        };
         let mut raw_packet = queue.recv().unwrap();
         raw_packet.set_verdict(Verdict::Accept);
         let payload = raw_packet.get_payload();
@@ -38,17 +37,30 @@ async fn main() {
             queue.verdict(raw_packet).unwrap();
             continue;
         };
-        let out_interface = raw_packet.get_outdev();
-        info!(
-            "[{} from {} {} {} -> {}] {:?}",
-            raw_packet.get_hw_protocol(),
-            out_interface,
-            if out_interface == 0 { "IN" } else { "OUT" },
-            packet.source,
-            packet.destination,
-            packet.content,
-        );
-        i += 1;
+
+        info!("buffer len: {}", parser.buffer.len);
+        parser.buffer.update(packet.content, packet.content.len());
+        info!("buffer len: {}", parser.buffer.len);
+        let side = if raw_packet.get_outdev() == 0 { Side::S2C } else { Side::C2S };
+        /*
+        let Ok((packet, len)) = parser.try_parse(side) else {
+            queue.verdict(raw_packet).unwrap();
+            continue;
+        };
+        */
+        match parser.try_parse(side) {
+            Ok((packet, len)) => {
+                info!("data: {:?}", packet);
+                parser.buffer.move_buffer(len, 0);
+            },
+            Err(e) => {
+                error!("Parse error: {}", e);
+                continue;
+            }
+        }
+        /*
+        info!("data: {:?}", packet);
+        parser.buffer.move_buffer(len, 0); */
         // buffer.update(packet.content, packet.content.len());
         /*
         if let Ok(_) = modify_packet(&raw_packet, packet, &mut buffer) {
@@ -58,6 +70,9 @@ async fn main() {
         queue.verdict(raw_packet).unwrap();
     }
 }
+
+
+
 
 fn modify_packet<'a>(raw_packet: &'a Message, mut packet: Packet<'a>, buffer: &mut BigBuffer) -> eyre::Result<()> {
     let out_interface = raw_packet.get_outdev();
