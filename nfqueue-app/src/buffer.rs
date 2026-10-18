@@ -1,3 +1,5 @@
+use tracing::info;
+
 const BUFFER_LEN: usize = 1024 * 32;
 
 pub struct BigBuffer {
@@ -8,7 +10,7 @@ pub struct BigBuffer {
 impl BigBuffer {
     pub fn new() -> Self {
         Self {
-            buffer: Vec::with_capacity(BUFFER_LEN),
+            buffer: vec![0u8; BUFFER_LEN],
             len: 0,
         }
     }
