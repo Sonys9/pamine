@@ -18,7 +18,7 @@ impl BigBuffer {
     pub fn update(&mut self, buffer: &[u8], len: usize) -> usize {
         let clean_buffer = &buffer[..len];
         if BUFFER_LEN - self.len < len {
-            let diff = self.len + len - 2048;
+            let diff = self.len + len - BUFFER_LEN;
             let old_len = self.len - diff;
             self.move_buffer(diff, 0);
             self.buffer[old_len..old_len + len].copy_from_slice(clean_buffer);
