@@ -101,6 +101,9 @@ impl Connector {
                         break;
                     }
                 };
+                if parser.is_clear(side) {
+                    break;
+                };
             };
 
             target_stream.write_all(&buffer[..len]).await?;
