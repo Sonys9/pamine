@@ -1,6 +1,6 @@
 use tracing::info;
 
-const BUFFER_LEN: usize = 1024 * 32;
+pub const BUFFER_LEN: usize = 1024 * 32;
 
 pub struct BigBuffer {
     pub buffer: Vec<u8>,
@@ -16,8 +16,11 @@ impl BigBuffer {
     }
 
     pub fn update(&mut self, buffer: &[u8], len: usize) -> usize {
+        if len > BUFFER_LEN {
+            panic!("got too big packet");
+        };
         let clean_buffer = &buffer[..len];
-        if BUFFER_LEN - self.len < len {
+        if BUFFER_LEN - self.len <= len {
             let diff = self.len + len - BUFFER_LEN;
             let old_len = self.len - diff;
             self.move_buffer(diff, 0);
@@ -37,7 +40,6 @@ impl BigBuffer {
         if start > end {
             panic!("Can't remove due to start > end!");
         };
-        self.len = self.len - (end - start);
         self.move_buffer(end, start);
     }
 

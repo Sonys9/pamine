@@ -1,7 +1,8 @@
 use pcore::Decode;
+use pcore_gen::DecodePacket;
 
 #[derive(Clone, Debug)]
 pub enum Handshake {}
 
-#[derive(Decode, Debug)]
-pub struct Handshaking;
+#[derive(Decode, Debug, Clone)]
+pub struct HandshakeOk;

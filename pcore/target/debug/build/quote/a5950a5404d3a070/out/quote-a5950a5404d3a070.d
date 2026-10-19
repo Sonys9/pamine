@@ -1,0 +1,11 @@
+/home/freedomleaker/nfqueue/pcore/target/debug/build/quote/a5950a5404d3a070/out/quote-a5950a5404d3a070.d: /home/freedomleaker/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/quote-1.0.47/src/lib.rs /home/freedomleaker/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/quote-1.0.47/src/ext.rs /home/freedomleaker/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/quote-1.0.47/src/format.rs /home/freedomleaker/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/quote-1.0.47/src/ident_fragment.rs /home/freedomleaker/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/quote-1.0.47/src/to_tokens.rs /home/freedomleaker/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/quote-1.0.47/src/runtime.rs /home/freedomleaker/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/quote-1.0.47/src/spanned.rs
+
+/home/freedomleaker/nfqueue/pcore/target/debug/build/quote/a5950a5404d3a070/out/libquote-a5950a5404d3a070.rmeta: /home/freedomleaker/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/quote-1.0.47/src/lib.rs /home/freedomleaker/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/quote-1.0.47/src/ext.rs /home/freedomleaker/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/quote-1.0.47/src/format.rs /home/freedomleaker/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/quote-1.0.47/src/ident_fragment.rs /home/freedomleaker/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/quote-1.0.47/src/to_tokens.rs /home/freedomleaker/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/quote-1.0.47/src/runtime.rs /home/freedomleaker/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/quote-1.0.47/src/spanned.rs
+
+/home/freedomleaker/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/quote-1.0.47/src/lib.rs:
+/home/freedomleaker/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/quote-1.0.47/src/ext.rs:
+/home/freedomleaker/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/quote-1.0.47/src/format.rs:
+/home/freedomleaker/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/quote-1.0.47/src/ident_fragment.rs:
+/home/freedomleaker/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/quote-1.0.47/src/to_tokens.rs:
+/home/freedomleaker/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/quote-1.0.47/src/runtime.rs:
+/home/freedomleaker/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/quote-1.0.47/src/spanned.rs:
