@@ -131,6 +131,7 @@ dependencies = [
  "nfq",
  "pcore",
  "pcore-gen",
+ "socket2",
  "sudo",
  "tokio",
  "tracing",
