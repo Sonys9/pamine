@@ -1,4 +1,8 @@
+use std::{borrow::Cow, io::Read, mem, slice::from_raw_parts};
+
+use flate2::read::GzDecoder;
 use pcore::{decoder::Decoder, encoder};
+use tracing::info;
 use crate::{
     buffer::BigBuffer,
     packets::{
@@ -98,6 +102,8 @@ pub struct Parser {
     state: State,
     pub c2s: StreamData,
     pub s2c: StreamData,
+    threshold: Option<i32>,
+    decompress_buffer: Vec<u8>,
 }
 
 impl Parser {
@@ -106,6 +112,8 @@ impl Parser {
             state: State::Handshake,
             c2s: StreamData::default(),
             s2c: StreamData::default(),
+            threshold: None,
+            decompress_buffer: Vec::new()
         }
     }
 
@@ -140,33 +148,36 @@ impl Parser {
     }
 
     #[inline]
-    pub fn try_parse<'a>(&mut self, side: Side) -> eyre::Result<Packet<'a>> {
+    pub fn try_parse<'a>(&'a mut self, side: Side) -> eyre::Result<Packet<'_>> {
         let stream_data = Self::sd_by_side(side, &mut self.c2s, &mut self.s2c);
-        let slice: &'a [u8] = unsafe {
-            std::slice::from_raw_parts(
-                stream_data.buffer.buffer.as_ptr(),
-                stream_data.buffer.len,
-            )
-        };
+        let slice: &'a [u8] = &stream_data.buffer.buffer[..stream_data.buffer.len];
         let Ok(packet) = Decoder::new(slice).slice() else {
             eyre::bail!("Bad packet");
         };
+        let packet = if let Some(threshold) = self.threshold && packet.len() as i32 > threshold && threshold > -1 {
+            let mut decoder = GzDecoder::new(packet);
+            decoder.read_to_end(&mut self.decompress_buffer)?;
+            &self.decompress_buffer
+        } else {
+            packet
+        };
+        let packet_len = packet.len();
         let mut decoder = Decoder::new(packet);
         let Ok(opcode) = decoder.varint() else {
             eyre::bail!("Bad packet opcode");
         };
-        stream_data.diff += packet.len() + encoder::varint(packet.len() as u32).len();
+        stream_data.diff += packet_len + encoder::varint(packet_len as u32).len();
         match self.state {
-            State::Handshake => self.handshake_side(opcode.get(), decoder, side),
-            State::Login => self.login_side(opcode.get(), decoder, side),
-            State::Play => self.play_side(opcode.get(), decoder, side),
-            State::Status => self.status_side(opcode.get(), decoder, side),
+            State::Handshake => Self::handshake_side(&mut self.state, opcode.get(), decoder, side),
+            State::Login => Self::login_side(&mut self.state, opcode.get(), decoder, side),
+            State::Play => Self::play_side(opcode.get(), decoder, side),
+            State::Status => Self::status_side(opcode.get(), decoder, side),
         }
     }
 
     #[inline]
     fn login_side<'a>(
-        &mut self,
+        state: &mut State,
         opcode: i32,
         mut decoder: Decoder<'a>,
         side: Side,
@@ -178,7 +189,9 @@ impl Parser {
             }
             Side::S2C => {
                 let parsed = s2c::login::Login::decode_by_opcode(opcode, &mut decoder)?;
-                self.state = State::Play;
+                if let s2c::login::Login::LoginSuccess(_) = parsed {
+                    *state = State::Play;
+                };
                 Ok(Packet::S2C(S2CPacket::Login(parsed)))
             }
         }
@@ -186,7 +199,7 @@ impl Parser {
 
     #[inline]
     fn handshake_side<'a>(
-        &mut self,
+        state: &mut State,
         opcode: i32,
         mut decoder: Decoder<'a>,
         side: Side,
@@ -194,7 +207,11 @@ impl Parser {
         match side {
             Side::C2S => {
                 let parsed = c2s::handshake::Handshake::decode_by_opcode(opcode, &mut decoder)?;
-                self.state = State::Login;
+                let c2s::handshake::Handshake::Handshaking(ref packet) = parsed;
+                match packet.next_state.get() {
+                    1 => *state = State::Status,
+                    _ => *state = State::Login
+                };
                 Ok(Packet::C2S(C2SPacket::Handshake(parsed)))
             }
             Side::S2C => panic!("Impossible event"),
@@ -203,7 +220,6 @@ impl Parser {
 
     #[inline]
     fn status_side<'a>(
-        &mut self,
         opcode: i32,
         mut decoder: Decoder<'a>,
         side: Side,
@@ -222,7 +238,6 @@ impl Parser {
 
     #[inline]
     fn play_side<'a>(
-        &mut self,
         opcode: i32,
         mut decoder: Decoder<'a>,
         side: Side,
@@ -243,6 +258,12 @@ impl Parser {
     pub fn clear(&mut self, side: Side) {
         let stream_data = Self::sd_by_side(side, &mut self.c2s, &mut self.s2c);
         stream_data.buffer.move_buffer(stream_data.diff, 0);
+        stream_data.diff = 0;
+    }
+
+    #[inline]
+    pub fn is_clear(&mut self, side: Side) -> bool {
+        Self::sd_by_side(side, &mut self.c2s, &mut self.s2c).buffer.len == 0
     }
 
     /*
