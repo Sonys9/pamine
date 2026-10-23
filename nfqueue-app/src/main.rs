@@ -1,24 +1,30 @@
 #![feature(ip_as_octets)]
 
 use std::{
-    env, io::Write, mem::transmute, net::{IpAddr, Ipv4Addr, SocketAddr}, slice::{from_raw_parts, from_raw_parts_mut}, sync::Arc, time::UNIX_EPOCH,
+    env,
+    io::Write,
+    mem::transmute,
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    slice::{from_raw_parts, from_raw_parts_mut},
+    sync::Arc,
+    time::UNIX_EPOCH,
 };
 
 use etherparse::{
     IpHeaders, IpNumber, IpPayloadSlice, Ipv4Extensions, Ipv4Header, NetHeaders, NetSlice,
     PacketBuilder, PacketHeaders, SlicedPacket, TcpHeader, TcpSlice, TransportSlice::Tcp,
 };
-use nfq::{Message, Queue, Verdict};
 use pcore::{
     Decode,
     decoder::{self, Decoder, VarInt},
 };
-use sudo::check;
 use tokio::net::TcpListener;
 use tracing::{error, info};
 
 use crate::{
-    buffer::BigBuffer, connections::Connector, packets::{Side, c2s, parser},
+    buffer::BigBuffer,
+    connections::Connector,
+    packets::{Side, c2s, parser},
 };
 
 mod buffer;

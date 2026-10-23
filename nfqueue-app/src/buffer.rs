@@ -1,6 +1,6 @@
 use tracing::info;
 
-pub const BUFFER_LEN: usize = 1024 * 32;
+pub const BUFFER_LEN: usize = 1024 * 1024 * 2 + 1024 * 64; // 2 MB + 64 KB
 
 pub struct BigBuffer {
     pub buffer: Vec<u8>,

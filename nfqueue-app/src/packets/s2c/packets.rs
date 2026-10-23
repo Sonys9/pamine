@@ -5,5 +5,5 @@ pub enum S2CPacket<'a> {
     Handshake(Handshake),
     Login(Login<'a>),
     Play(Play<'a>),
-    Status(Status<'a>)
+    Status(Status<'a>),
 }
