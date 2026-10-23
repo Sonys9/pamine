@@ -1,13 +1,18 @@
 use std::{
-    net::SocketAddr, os::fd::{AsRawFd, FromRawFd}, sync::Arc, time::Duration,
+    net::SocketAddr,
+    os::fd::{AsRawFd, FromRawFd},
+    sync::Arc,
+    time::Duration,
 };
 
 use socket2::{Domain, SockAddr, Type};
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt}, net::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::{
         TcpStream,
         tcp::{OwnedReadHalf, OwnedWriteHalf},
-    }, sync::Mutex,
+    },
+    sync::Mutex,
 };
 use tracing::{error, info};
 
@@ -23,13 +28,16 @@ pub struct Connector {
 impl Connector {
     #[inline]
     pub fn new(local_addr: SocketAddr, magic_number: u32) -> Self {
-        Self { local_addr, magic_number }
+        Self {
+            local_addr,
+            magic_number,
+        }
     }
 
     pub async fn connection(&self, stream: TcpStream, addr: SocketAddr) -> eyre::Result<()> {
         let target = stream_to_target_addr(&stream)?;
         info!("{:?} -> {:?}", addr, target.as_socket());
-    
+
         let target_stream = self.get_stream(&target).await?;
         let (stream_reader, stream_writer) = stream.into_split();
         let (target_stream_reader, target_stream_writer) = target_stream.into_split();
@@ -65,11 +73,15 @@ impl Connector {
         mut stream: OwnedReadHalf,
         mut target_stream: OwnedWriteHalf,
         local_addr: SocketAddr,
-        parser: Arc<Mutex<Parser>>
+        parser: Arc<Mutex<Parser>>,
     ) -> eyre::Result<()> {
         let target_addr = target_stream.local_addr()?;
         let client_addr = stream.local_addr()?;
-        let side = if target_addr == local_addr { Side::S2C } else { Side::C2S };
+        let side = if target_addr == local_addr {
+            Side::S2C
+        } else {
+            Side::C2S
+        };
 
         let mut buffer = [0u8; 1024 * 4];
         loop {
@@ -93,9 +105,18 @@ impl Connector {
             loop {
                 match parser.try_parse(side) {
                     Ok(packet) => {
-                        info!("parsed packet: {:?}", packet);
+                        let str = format!("{:?}", packet);
+                        let mut iter = str.split("(");
+                        iter.next();
+                        iter.next();
+                        info!(
+                            "parsed packet: {:?} {:?} {}",
+                            iter.next().unwrap(),
+                            packet,
+                            str.len()
+                        );
                         parser.clear(side);
-                    },
+                    }
                     Err(e) => {
                         error!("{}", e);
                         break;
@@ -104,7 +125,7 @@ impl Connector {
                 if parser.is_clear(side) {
                     break;
                 };
-            };
+            }
 
             target_stream.write_all(&buffer[..len]).await?;
         }
