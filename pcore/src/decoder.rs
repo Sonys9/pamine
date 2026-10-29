@@ -16,29 +16,51 @@ impl<'a> Decoder<'a> {
         }
     }
 
-    pub fn get(&self) -> &'a [u8] { &self.payload[self.len..] }
-    pub fn set(&mut self, payload: &'a [u8]) { self.payload = payload }
+    /// Returns the not-yet-consumed tail. Never panics.
+    pub fn get(&self) -> &'a [u8] {
+        self.payload.get(self.len..).unwrap_or(&[])
+    }
 
+    /// Replaces the payload and rewinds the read position.
+    pub fn set(&mut self, payload: &'a [u8]) {
+        self.payload = payload;
+        self.len = 0;
+    }
+
+    /// Reads a VarLong.
+    ///
+    /// The wire format is a 64-bit two's-complement value encoded 7 bits per
+    /// byte, so the accumulated bits are reinterpreted as `i64` at the end.
     pub fn varlong(&mut self) -> Result<VarLong, Error> {
-        let mut value = 0;
+        let mut value: u64 = 0;
         let mut shift = 0;
         for _ in 0..10 {
             let byte = self.u8()?;
-            value |= (byte as i64 & 0b1111111) << shift;
+            value |= ((byte & 0b0111_1111) as u64) << shift;
             shift += 7;
-            if byte & 0b10000000 == 0 {
-                return Ok(VarLong::new(value));
-            };
-        };
+            if byte & 0b1000_0000 == 0 {
+                return Ok(VarLong::new(value as i64));
+            }
+        }
         Err(Error::VarLong)
     }
 
+    /// Reads a VarInt.
+    ///
+    /// A VarInt is a 32-bit two's-complement value, so `-1` arrives as
+    /// `FF FF FF FF 0F` and must come back as `-1`, not as an error.
     pub fn varint(&mut self) -> Result<VarInt, Error> {
-        let number = self.varlong()?.get();
-        if number > i32::MAX as i64 {
-            return Err(Error::VarInt);
-        };
-        Ok(VarInt::new(number as i32))
+        let mut value: u32 = 0;
+        let mut shift = 0;
+        for _ in 0..5 {
+            let byte = self.u8()?;
+            value |= ((byte & 0b0111_1111) as u32) << shift;
+            shift += 7;
+            if byte & 0b1000_0000 == 0 {
+                return Ok(VarInt::new(value as i32));
+            }
+        }
+        Err(Error::VarInt)
     }
 
     pub fn u8(&mut self) -> Result<u8, Error> {
@@ -99,25 +121,34 @@ impl<'a> Decoder<'a> {
     }
 
     pub fn read_len(&mut self, len: usize) -> Result<&'a [u8], Error> {
-        if self.payload.len() < self.len + len {
-            return Err(Error::Read(len))
-        };
-        let slice = &self.payload[self.len..self.len + len];
-        self.len += len;
+        let end = self.len.checked_add(len).ok_or(Error::Read(len))?;
+        if self.payload.len() < end {
+            return Err(Error::Read(len));
+        }
+        let slice = &self.payload[self.len..end];
+        self.len = end;
         Ok(slice)
     }
-    
+
     pub fn slice<T: Pod>(&mut self) -> Result<&'a [T], Error> {
-        let len = self.varint()?.get() as usize;
-        let total = len * size_of::<T>();
-        let slice = bytemuck::try_cast_slice::<u8, T>(self.read_len(total)?).map_err(|_| Error::Read(total))?; // so it converts &[u8] to &[T]
+        let len = self.varint()?.get();
+        if len < 0 {
+            return Err(Error::Read(0));
+        }
+        let len = len as usize;
+        let total = len.checked_mul(size_of::<T>()).ok_or(Error::Read(len))?;
+        let slice = bytemuck::try_cast_slice::<u8, T>(self.read_len(total)?)
+            .map_err(|_| Error::Read(total))?; // so it converts &[u8] to &[T]
         Ok(slice)
     }
 
     /// Reads a VarInt-prefixed UTF-8 string.
     pub fn string(&mut self) -> Result<String, Error> {
-        let len = self.varint()?.get() as usize;
-        let bytes = self.read_len(len)?;
+        let len = self.varint()?.get();
+        if len < 0 {
+            return Err(Error::Utf8);
+        }
+        let bytes = self.read_len(len as usize)?;
         std::str::from_utf8(bytes)
             .map(str::to_owned)
             .map_err(|_| Error::Utf8)
@@ -125,8 +156,11 @@ impl<'a> Decoder<'a> {
 
     /// Reads a VarInt-prefixed byte array.
     pub fn bytes(&mut self) -> Result<Vec<u8>, Error> {
-        let len = self.varint()?.get() as usize;
-        Ok(self.read_len(len)?.to_vec())
+        let len = self.varint()?.get();
+        if len < 0 {
+            return Err(Error::Read(0));
+        }
+        Ok(self.read_len(len as usize)?.to_vec())
     }
 
     pub fn uuid(&mut self) -> Result<Uuid, Error> {
@@ -135,6 +169,22 @@ impl<'a> Decoder<'a> {
 
     #[inline]
     pub fn len(&self) -> usize { self.len }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool { self.len == 0 }
+
+    /// Number of bytes still available to read.
+    #[inline]
+    pub fn remaining(&self) -> usize {
+        self.payload.len().saturating_sub(self.len)
+    }
+
+    /// Consumes and returns everything that is left.
+    pub fn rest(&mut self) -> &'a [u8] {
+        let tail = self.get();
+        self.len = self.payload.len();
+        tail
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -172,4 +222,97 @@ impl Uuid {
     pub fn new(bytes: [u8; 16]) -> Self { Self { bytes } }
     pub fn edit(&mut self, bytes: [u8; 16]) { self.bytes = bytes }
     pub fn get(&self) -> [u8; 16] { self.bytes }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn varint_positive() {
+        let mut d = Decoder::new(&[0x00]);
+        assert_eq!(d.varint().unwrap().get(), 0);
+
+        let mut d = Decoder::new(&[0x7f]);
+        assert_eq!(d.varint().unwrap().get(), 127);
+
+        let mut d = Decoder::new(&[0xac, 0x02]);
+        assert_eq!(d.varint().unwrap().get(), 300);
+    }
+
+    #[test]
+    fn varint_negative() {
+        // -1 == FF FF FF FF 0F
+        let mut d = Decoder::new(&[0xff, 0xff, 0xff, 0xff, 0x0f]);
+        assert_eq!(d.varint().unwrap().get(), -1);
+
+        // -2147483648 == 80 80 80 80 08
+        let mut d = Decoder::new(&[0x80, 0x80, 0x80, 0x80, 0x08]);
+        assert_eq!(d.varint().unwrap().get(), i32::MIN);
+    }
+
+    #[test]
+    fn varint_max() {
+        // i32::MAX == FF FF FF FF 07
+        let mut d = Decoder::new(&[0xff, 0xff, 0xff, 0xff, 0x07]);
+        assert_eq!(d.varint().unwrap().get(), i32::MAX);
+    }
+
+    #[test]
+    fn varlong_negative() {
+        // -1 as VarLong == FF FF FF FF FF FF FF FF FF 01
+        let mut d = Decoder::new(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01]);
+        assert_eq!(d.varlong().unwrap().get(), -1);
+    }
+
+    #[test]
+    fn varint_too_long_errors() {
+        let mut d = Decoder::new(&[0x80, 0x80, 0x80, 0x80, 0x80, 0x80]);
+        assert!(d.varint().is_err());
+    }
+
+    #[test]
+    fn get_does_not_panic_past_end() {
+        let mut d = Decoder::new(&[1, 2, 3]);
+        d.read_len(3).unwrap();
+        assert_eq!(d.get(), &[] as &[u8]);
+        assert_eq!(d.remaining(), 0);
+    }
+
+    #[test]
+    fn read_len_rejects_overflow() {
+        let mut d = Decoder::new(&[1, 2, 3]);
+        assert!(d.read_len(usize::MAX).is_err());
+    }
+
+    #[test]
+    fn set_rewinds_position() {
+        let mut d = Decoder::new(&[1, 2, 3]);
+        d.read_len(2).unwrap();
+        assert_eq!(d.len(), 2);
+        d.set(&[9, 9]);
+        assert_eq!(d.len(), 0);
+        assert_eq!(d.u8().unwrap(), 9);
+    }
+
+    #[test]
+    fn rest_consumes_tail() {
+        let mut d = Decoder::new(&[1, 2, 3, 4]);
+        d.read_len(1).unwrap();
+        assert_eq!(d.rest(), &[2, 3, 4]);
+        assert_eq!(d.remaining(), 0);
+    }
+
+    #[test]
+    fn string_roundtrip() {
+        // len=2, "hi"
+        let mut d = Decoder::new(&[0x02, b'h', b'i']);
+        assert_eq!(d.string().unwrap(), "hi");
+    }
+
+    #[test]
+    fn bytes_roundtrip() {
+        let mut d = Decoder::new(&[0x03, 1, 2, 3]);
+        assert_eq!(d.bytes().unwrap(), vec![1, 2, 3]);
+    }
 }
