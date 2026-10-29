@@ -42,3 +42,9 @@ fn test_decode_packet_duplicate_id_should_fail() {
     let t = trybuild::TestCases::new();
     t.compile_fail("tests/compile-fail/duplicate_id.rs");
 }
+
+#[test]
+fn test_decode_non_u8_slice_should_fail() {
+    let t = trybuild::TestCases::new();
+    t.compile_fail("tests/compile-fail/slice_non_u8.rs");
+}

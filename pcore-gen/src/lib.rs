@@ -184,10 +184,17 @@ fn decode_type(ty: &Type) -> proc_macro2::TokenStream {
     match ty {
         Type::Reference(reference) => {
             match &*reference.elem {
-                // &[T] -> borrowed slice, no copy
+                // &[u8] -> borrowed byte slice, no copy. Only `u8` is supported:
+                // reinterpreting as `&[u32]` would need alignment and would keep
+                // native byte order, while the protocol is big-endian.
                 Type::Slice(slice) => {
-                    let elem_type = &slice.elem;
-                    return quote! { decoder.slice::<#elem_type>() };
+                    let elem_type: &Type = &slice.elem;
+                    if !matches!(elem_type, Type::Path(p) if p.path.is_ident("u8")) {
+                        return quote! {
+                            compile_error!("Decode only supports &[u8]; decode numeric arrays element-wise with from_be_bytes")
+                        };
+                    }
+                    return quote! { decoder.slice() };
                 }
                 // &str / &'b str -> borrowed UTF-8, no copy
                 Type::Path(path) if path.path.is_ident("str") => {

@@ -130,27 +130,24 @@ impl<'a> Decoder<'a> {
         Ok(slice)
     }
 
-    pub fn slice<T: Pod>(&mut self) -> Result<&'a [T], Error> {
+    /// Reads a VarInt-prefixed byte slice.
+    ///
+    /// Deliberately not generic: reinterpreting `&[u8]` as `&[u32]` would need
+    /// the pointer to be aligned *and* would keep the bytes in native order,
+    /// while the protocol is big-endian. Use [`read_type`](Self::read_type) for
+    /// scalars, or decode element-wise with `from_be_bytes` for arrays.
+    pub fn slice(&mut self) -> Result<&'a [u8], Error> {
         let len = self.varint()?.get();
         if len < 0 {
             return Err(Error::Read(0));
         }
-        let len = len as usize;
-        let total = len.checked_mul(size_of::<T>()).ok_or(Error::Read(len))?;
-        let slice = bytemuck::try_cast_slice::<u8, T>(self.read_len(total)?)
-            .map_err(|_| Error::Read(total))?; // so it converts &[u8] to &[T]
-        Ok(slice)
+        self.read_len(len as usize)
     }
 
     /// Reads a VarInt-prefixed UTF-8 string.
-    pub fn string(&mut self) -> Result<String, Error> {
-        let len = self.varint()?.get();
-        if len < 0 {
-            return Err(Error::Utf8);
-        }
-        let bytes = self.read_len(len as usize)?;
-        std::str::from_utf8(bytes)
-            .map(str::to_owned)
+    pub fn string(&mut self) -> Result<&'a str, Error> {
+        let slice = self.slice()?;
+        std::str::from_utf8(slice)
             .map_err(|_| Error::Utf8)
     }
 

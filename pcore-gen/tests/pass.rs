@@ -54,8 +54,8 @@ struct MultiTupleStruct(i32, i64, bool);
 
 // Test struct with String and Vec<u8>
 #[derive(Decode)]
-struct WithOwned {
-    name: String,
+struct WithOwned<'a> {
+    name: &'a str,
     data: Vec<u8>,
 }
 
