@@ -8,6 +8,12 @@ pub enum Error {
     #[error("Failed to read due to payload < type len: tried to read {0} bytes")]
     Read(usize),
 
+    #[error("Read error")]
+    ReadType,
+
+    #[error("Invalid VarLong")]
+    VarLong,
+
     #[error("Invalid VarInt")]
     VarInt,
 

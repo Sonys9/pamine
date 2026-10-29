@@ -1,5 +1,3 @@
-use crate::decoder::VarInt;
-
 pub fn varint(mut number: u32) -> Vec<u8> {
     let mut array = Vec::with_capacity(5);
     loop {
