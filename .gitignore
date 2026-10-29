@@ -1,0 +1,25 @@
+# Rust build artifacts (any crate, any depth)
+target/
+**/target/
+
+# trybuild scratch output
+wip/
+**/wip/
+
+# Local environment / secrets
+.env
+**/.env
+!.env.template
+!**/.env.template
+
+# Editor / OS noise
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+
+# Logs and dumps
+*.log
+*.pcap
+*.pcapng
