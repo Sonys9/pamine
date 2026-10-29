@@ -107,7 +107,10 @@ impl Connector {
                 parser.update(side, &buffer[..len]);
                 loop {
                     match parser.try_parse(side) {
-                        Ok(packet) => {
+                        // `None` means the buffer holds only a partial packet;
+                        // wait for the next read instead of logging an error.
+                        Ok(None) => break,
+                        Ok(Some(packet)) => {
                             info!("[{:?}] parsed packet: {:?}", side, packet);
                             parser.clear(side);
                         }
@@ -115,10 +118,7 @@ impl Connector {
                             error!("[{:?}] {}", side, e);
                             break;
                         }
-                    };
-                    if parser.is_clear(side) {
-                        break;
-                    };
+                    }
                 }
             }
 
