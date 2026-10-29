@@ -59,6 +59,26 @@ struct WithOwned {
     data: Vec<u8>,
 }
 
+// Test borrowed &str - must not allocate
+#[derive(Decode)]
+struct WithBorrowedStr<'a> {
+    name: &'a str,
+    id: VarInt,
+}
+
+// Test &str with an explicitly named lifetime that differs from 'a
+#[derive(Decode)]
+struct WithRenamedLifetime<'b> {
+    label: &'b str,
+}
+
+// Test &str alongside &[u8] in the same struct
+#[derive(Decode)]
+struct WithStrAndSlice<'a> {
+    name: &'a str,
+    payload: &'a [u8],
+}
+
 // Test struct with u32
 #[derive(Decode)]
 struct WithU32 {

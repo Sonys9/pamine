@@ -183,10 +183,17 @@ fn decode_lifetime(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream>
 fn decode_type(ty: &Type) -> proc_macro2::TokenStream {
     match ty {
         Type::Reference(reference) => {
-            // Handle &[T] references - use decoder.slice()
-            if let Type::Slice(slice) = &*reference.elem {
-                let elem_type = &slice.elem;
-                return quote! { decoder.slice::<#elem_type>() };
+            match &*reference.elem {
+                // &[T] -> borrowed slice, no copy
+                Type::Slice(slice) => {
+                    let elem_type = &slice.elem;
+                    return quote! { decoder.slice::<#elem_type>() };
+                }
+                // &str / &'b str -> borrowed UTF-8, no copy
+                Type::Path(path) if path.path.is_ident("str") => {
+                    return quote! { decoder.string() };
+                }
+                _ => {}
             }
             // For other reference types, fallback to Decode
             quote! { ::pcore::Decode::decode(decoder) }
@@ -242,7 +249,9 @@ fn decode_type(ty: &Type) -> proc_macro2::TokenStream {
                 "Uuid" => return quote! { decoder.uuid() },
                 "VarInt" => return quote! { decoder.varint() },
                 "VarLong" => return quote! { decoder.varlong() },
-                "String" => return quote! { decoder.string() },
+                // Owned String: the only case that must allocate, because the
+                // field type owns its data. Prefer `&'a str` to avoid the copy.
+                "String" => return quote! { decoder.string().map(str::to_owned) },
                 // Fallback: assume type implements ::pcore::Decode
                 _ => return quote! { ::pcore::Decode::decode(decoder) },
             }
