@@ -20,6 +20,9 @@ pub enum Error {
     #[error("Invalid UTF-8 string")]
     Utf8,
 
+    #[error("Invalid NBT: {0}")]
+    Nbt(&'static str),
+
     #[error("Unknown opcode: {0}")]
     UnknownOpcode(i32),
 }
