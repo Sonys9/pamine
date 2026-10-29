@@ -1,0 +1,7 @@
+error: proc-macro derive panicked
+ --> tests/compile-fail/decode_on_enum.rs:3:10
+  |
+3 | #[derive(Decode)]
+  |          ^^^^^^
+  |
+  = help: message: Decode derive requires a struct

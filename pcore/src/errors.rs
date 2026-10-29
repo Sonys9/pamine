@@ -17,6 +17,9 @@ pub enum Error {
     #[error("Invalid VarInt")]
     VarInt,
 
+    #[error("Invalid UTF-8 string")]
+    Utf8,
+
     #[error("Unknown opcode: {0}")]
     UnknownOpcode(i32),
 }

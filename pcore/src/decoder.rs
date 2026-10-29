@@ -77,6 +77,10 @@ impl<'a> Decoder<'a> {
         Ok(i32::from_be_bytes(self.read::<i32>()?.try_into().unwrap()))
     }
 
+    pub fn u32(&mut self) -> Result<u32, Error> {
+        Ok(u32::from_be_bytes(self.read::<u32>()?.try_into().unwrap()))
+    }
+
     pub fn i8(&mut self) -> Result<i8, Error> {
         Ok(i8::from_be_bytes(self.read::<i8>()?.try_into().unwrap()))
     }
@@ -108,6 +112,21 @@ impl<'a> Decoder<'a> {
         let total = len * size_of::<T>();
         let slice = bytemuck::try_cast_slice::<u8, T>(self.read_len(total)?).map_err(|_| Error::Read(total))?; // so it converts &[u8] to &[T]
         Ok(slice)
+    }
+
+    /// Reads a VarInt-prefixed UTF-8 string.
+    pub fn string(&mut self) -> Result<String, Error> {
+        let len = self.varint()?.get() as usize;
+        let bytes = self.read_len(len)?;
+        std::str::from_utf8(bytes)
+            .map(str::to_owned)
+            .map_err(|_| Error::Utf8)
+    }
+
+    /// Reads a VarInt-prefixed byte array.
+    pub fn bytes(&mut self) -> Result<Vec<u8>, Error> {
+        let len = self.varint()?.get() as usize;
+        Ok(self.read_len(len)?.to_vec())
     }
 
     pub fn uuid(&mut self) -> Result<Uuid, Error> {

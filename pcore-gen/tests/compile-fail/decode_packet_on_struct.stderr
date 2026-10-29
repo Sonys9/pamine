@@ -1,0 +1,7 @@
+error: proc-macro derive panicked
+ --> tests/compile-fail/decode_packet_on_struct.rs:3:10
+  |
+3 | #[derive(DecodePacket)]
+  |          ^^^^^^^^^^^^
+  |
+  = help: message: DecodePacket derive requires an enum

@@ -8,7 +8,7 @@ use syn::{
 /// Proc macro derive for decoding structs from a byte decoder.
 ///
 /// Generated implementation:
-/// ```rust
+/// ```text
 /// impl ::pcore::Decode<'_> for MyStruct {
 ///     fn decode(decoder: &mut ::pcore::decoder::Decoder<'_>) -> Result<Self, ::pcore::errors::Error> {
 ///         Ok(Self { field1: decoder.varint()?, field2: decoder.u8()? })
@@ -40,7 +40,7 @@ pub fn derive(stream: TokenStream) -> TokenStream {
 /// Proc macro derive for decoding packet enums by opcode.
 ///
 /// Generated implementation:
-/// ```rust
+/// ```text
 /// impl MyEnum {
 ///     pub fn decode_by_opcode(opcode: i32, decoder: &mut ::pcore::decoder::Decoder<'_>) -> Result<Self, ::pcore::errors::Error> {
 ///         match opcode {
@@ -90,7 +90,7 @@ pub fn derive_packet_enum(stream: TokenStream) -> TokenStream {
                     #opcode => {
                         let inner = #inner_decode?;
                         Ok(Self::#variant_name(inner))
-                    }
+                    },
                 });
             }
             _ => {
@@ -98,7 +98,7 @@ pub fn derive_packet_enum(stream: TokenStream) -> TokenStream {
                 match &variant.fields {
                     Fields::Unit => {
                         match_arms.push(quote! {
-                            #opcode => Ok(Self::#variant_name)
+                            #opcode => Ok(Self::#variant_name),
                         });
                     }
                     _ => {
@@ -111,13 +111,13 @@ pub fn derive_packet_enum(stream: TokenStream) -> TokenStream {
                                     let name = &field.ident;
                                     let field_ty = &field.ty;
                                     let decoder = decode_type(field_ty);
-                                    quote! { #name: #decoder? }
+                                    quote! { #name: #decoder?, }
                                 });
                             match_arms.push(quote! {
                                 #opcode => {
                                     let inner = Self::#variant_name { #(#field_decoders)* };
                                     Ok(inner)
-                                }
+                                },
                             });
                         } else {
                             // Fallback for other field types
@@ -125,7 +125,7 @@ pub fn derive_packet_enum(stream: TokenStream) -> TokenStream {
                                 #opcode => {
                                     let inner = ::pcore::Decode::decode(decoder)?;
                                     Ok(Self::#variant_name(inner))
-                                }
+                                },
                             });
                         }
                     }
@@ -185,6 +185,17 @@ fn decode_type(ty: &Type) -> proc_macro2::TokenStream {
                 }
             }
 
+            // Handle Vec<u8> - the ident alone is "Vec", so inspect the generic args
+            if name == "Vec" {
+                if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
+                    if let Some(syn::GenericArgument::Type(Type::Path(inner))) = args.args.first() {
+                        if inner.path.is_ident("u8") {
+                            return quote! { decoder.bytes() };
+                        }
+                    }
+                }
+            }
+
             // Handle primitive types
             match name.as_str() {
                 "i8" => return quote! { decoder.i8() },
@@ -202,7 +213,6 @@ fn decode_type(ty: &Type) -> proc_macro2::TokenStream {
                 "VarInt" => return quote! { decoder.varint() },
                 "VarLong" => return quote! { decoder.varlong() },
                 "String" => return quote! { decoder.string() },
-                "Vec<u8>" => return quote! { decoder.bytes() },
                 // Fallback: assume type implements ::pcore::Decode
                 _ => return quote! { ::pcore::Decode::decode(decoder) },
             }
@@ -261,11 +271,16 @@ fn process_struct(data: &syn::Data) -> proc_macro2::TokenStream {
             let field = &fields.unnamed[0];
             let type_ = &field.ty;
             let match_ = decode_type(type_);
-            quote! { Self(#match_) }
+            quote! { Self(#match_?) }
         }
-        Fields::Unnamed(_) => {
-            // Multiple unnamed fields - not supported yet, fallback to Decode
-            quote! { ::pcore::Decode::decode(decoder) }
+        Fields::Unnamed(fields) => {
+            // Multiple unnamed fields - decode each one in order
+            let iter = fields.unnamed.iter().map(|field| {
+                let type_ = &field.ty;
+                let match_ = decode_type(type_);
+                quote! { #match_?, }
+            });
+            quote! { Self(#(#iter)*) }
         }
     }
 }

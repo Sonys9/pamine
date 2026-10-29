@@ -1,0 +1,7 @@
+error: proc-macro derive panicked
+ --> tests/compile-fail/missing_id_attribute.rs:3:10
+  |
+3 | #[derive(DecodePacket)]
+  |          ^^^^^^^^^^^^
+  |
+  = help: message: Variant Variant1 missing #[id(N)] attribute
