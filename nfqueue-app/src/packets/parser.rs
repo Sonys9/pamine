@@ -8,10 +8,7 @@ use crate::{
     },
 };
 use flate2::read::{GzDecoder, ZlibDecoder};
-use pcore::{
-    decoder::Decoder,
-    encoder::{self, varint},
-};
+use pcore::decoder::Decoder;
 use tracing::info;
 
 /*pub struct Session<'a> {
@@ -152,11 +149,13 @@ impl Parser {
     pub fn try_parse<'a>(&'a mut self, side: Side) -> eyre::Result<Packet<'a>> {
         let stream_data = Self::sd_by_side(side, &mut self.c2s, &mut self.s2c);
         let slice: &'a [u8] = &stream_data.buffer.buffer[stream_data.diff..stream_data.buffer.len];
-        let mut decoder = Self::decode_or_pass(slice, self.threshold, &mut self.decompress_buffer)?;
+        let (mut decoder, consumed) =
+            Self::decode_or_pass(slice, self.threshold, &mut self.decompress_buffer)?;
         let Ok(opcode) = decoder.varint().map(|opcode| opcode.get()) else {
             eyre::bail!("Bad packet opcode");
         };
-        stream_data.diff += slice.len();
+        // Advance by exactly one packet, not by the whole remaining buffer.
+        stream_data.diff += consumed;
         match self.state {
             State::Handshake => Self::handshake_side(&mut self.state, opcode, decoder, side),
             State::Login => {
@@ -167,32 +166,48 @@ impl Parser {
         }
     }
 
+    /// Splits one packet off the front of `slice`.
+    ///
+    /// Returns a decoder positioned at the packet body (opcode first) plus the
+    /// number of bytes consumed from `slice`, so the caller can advance its
+    /// read cursor by exactly one packet.
     #[inline(always)]
     fn decode_or_pass<'a>(
         slice: &'a [u8],
         threshold: Option<i32>,
         decompress_buffer: &'a mut Vec<u8>,
-    ) -> eyre::Result<Decoder<'a>> {
-        let mut decoder = Decoder::new(slice);
-        let len = decoder.varint()?.get() as usize;
-        let len_bytes_len = varint(len as u32).len();
-        if slice.len() < len + len_bytes_len {
-            eyre::bail!(
-                "packet is too small! {} < {}",
-                slice.len(),
-                len + len_bytes_len
-            );
+    ) -> eyre::Result<(Decoder<'a>, usize)> {
+        let mut head = Decoder::new(slice);
+        let len = head.varint()?.get();
+        if len < 0 {
+            eyre::bail!("negative packet length: {len}");
+        }
+        let len = len as usize;
+        // Bytes actually consumed by the length prefix (handles non-canonical VarInts).
+        let len_bytes_len = head.len();
+        let total = len
+            .checked_add(len_bytes_len)
+            .ok_or_else(|| eyre::eyre!("packet length overflow"))?;
+        if slice.len() < total {
+            eyre::bail!("packet is too small! {} < {}", slice.len(), total);
+        }
+
+        let body = &slice[len_bytes_len..total];
+        let mut decoder = Decoder::new(body);
+
+        let Some(threshold) = threshold else {
+            return Ok((decoder, total));
         };
-        decoder.set(&slice[..len + len_bytes_len]);
-        if threshold.is_none() {
-            return Ok(decoder);
-        };
-        let data_len = decoder.varint()?.get() as usize;
-        if data_len == 0 {
-            return Ok(decoder);
-        };
+
+        let data_len = decoder.varint()?.get();
+        if data_len <= 0 {
+            // Uncompressed packet inside a compressed stream.
+            return Ok((decoder, total));
+        }
+
+        decompress_buffer.clear();
         let len = Self::decode(decoder.get(), decompress_buffer)?;
-        Ok(Decoder::new(&decompress_buffer[..len]))
+        Ok((Decoder::new(&decompress_buffer[..len]), total))
     }
 
     #[inline(always)]
