@@ -36,3 +36,9 @@ fn test_decode_packet_non_integer_id_should_fail() {
     let t = trybuild::TestCases::new();
     t.compile_fail("tests/compile-fail/non_integer_id.rs");
 }
+
+#[test]
+fn test_decode_packet_duplicate_id_should_fail() {
+    let t = trybuild::TestCases::new();
+    t.compile_fail("tests/compile-fail/duplicate_id.rs");
+}

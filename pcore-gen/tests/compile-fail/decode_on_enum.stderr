@@ -1,7 +1,7 @@
-error: proc-macro derive panicked
+error: Decode derive requires a struct
  --> tests/compile-fail/decode_on_enum.rs:3:10
   |
 3 | #[derive(Decode)]
   |          ^^^^^^
   |
-  = help: message: Decode derive requires a struct
+  = note: this error originates in the derive macro `Decode` (in Nightly builds, run with -Z macro-backtrace for more info)

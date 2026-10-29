@@ -1,0 +1,5 @@
+error: duplicate #[id(0)]: already used by variant `First`
+ --> tests/compile-fail/duplicate_id.rs:8:5
+  |
+8 |     Second(i32),
+  |     ^^^^^^

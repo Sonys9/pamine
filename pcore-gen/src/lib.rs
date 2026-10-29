@@ -1,9 +1,7 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{
-    Data, DeriveInput, Fields, Meta, Type,
-    parse_macro_input,
-};
+use std::collections::HashMap;
+use syn::{Data, DeriveInput, Fields, Meta, Type, parse_macro_input};
 
 /// Proc macro derive for decoding structs from a byte decoder.
 ///
@@ -18,17 +16,21 @@ use syn::{
 #[proc_macro_derive(Decode)]
 pub fn derive(stream: TokenStream) -> TokenStream {
     let input = parse_macro_input!(stream as DeriveInput);
+    match expand_decode(&input) {
+        Ok(tokens) => tokens.into(),
+        Err(e) => e.to_compile_error().into(),
+    }
+}
+
+fn expand_decode(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let name = &input.ident;
 
-    let decode = process_struct(&input.data);
+    let decode = process_struct(&input.data)?;
 
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
-    let lifetime = match input.generics.lifetimes().next() {
-        Some(_) => quote! { #ty_generics },
-        None => quote! { <'_> },
-    };
+    let lifetime = decode_lifetime(input)?;
 
-    TokenStream::from(quote! {
+    Ok(quote! {
         impl #impl_generics ::pcore::Decode #lifetime for #name #ty_generics #where_clause {
             fn decode(decoder: &mut ::pcore::decoder::Decoder #lifetime) -> Result<Self, ::pcore::errors::Error> {
                 Ok(#decode)
@@ -54,37 +56,55 @@ pub fn derive(stream: TokenStream) -> TokenStream {
 #[proc_macro_derive(DecodePacket, attributes(id))]
 pub fn derive_packet_enum(stream: TokenStream) -> TokenStream {
     let input = parse_macro_input!(stream as DeriveInput);
+    match expand_decode_packet(&input) {
+        Ok(tokens) => tokens.into(),
+        Err(e) => e.to_compile_error().into(),
+    }
+}
+
+fn expand_decode_packet(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let name = &input.ident;
 
     let Data::Enum(data_enum) = &input.data else {
-        panic!("DecodePacket derive requires an enum");
+        return Err(syn::Error::new_spanned(
+            &input.ident,
+            "DecodePacket derive requires an enum",
+        ));
     };
 
     let mut match_arms = Vec::new();
+    // opcode literal -> variant name, used to reject duplicates
+    let mut seen: HashMap<String, String> = HashMap::new();
 
     for variant in &data_enum.variants {
         let variant_name = &variant.ident;
 
-        // Extract optional opcode attribute
         let opcode = variant
             .attrs
             .iter()
             .find(|attr| attr.path().is_ident("id"))
-            .and_then(|attr| {
-                if let Meta::List(list) = &attr.meta {
-                    Some(list.tokens.clone())
-                } else {
-                    None
-                }
+            .and_then(|attr| match &attr.meta {
+                Meta::List(list) => Some(list.tokens.clone()),
+                _ => None,
             })
-            .unwrap_or_else(|| {
-                // Default opcode: use variant index as fallback
-                panic!("Variant {} missing #[id(N)] attribute", variant_name)
-            });
+            .ok_or_else(|| {
+                syn::Error::new_spanned(
+                    variant_name,
+                    format!("variant `{variant_name}` is missing a #[id(N)] attribute"),
+                )
+            })?;
+
+        let key = opcode.to_string();
+        if let Some(previous) = seen.insert(key.clone(), variant_name.to_string()) {
+            return Err(syn::Error::new_spanned(
+                variant_name,
+                format!("duplicate #[id({key})]: already used by variant `{previous}`"),
+            ));
+        }
 
         match &variant.fields {
             Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
-                let inner_ty = &fields.unnamed.iter().next().unwrap().ty;
+                let inner_ty = &fields.unnamed[0].ty;
                 let inner_decode = decode_type(inner_ty);
                 match_arms.push(quote! {
                     #opcode => {
@@ -93,55 +113,41 @@ pub fn derive_packet_enum(stream: TokenStream) -> TokenStream {
                     },
                 });
             }
-            _ => {
-                // Support unit variants and other variants
-                match &variant.fields {
-                    Fields::Unit => {
-                        match_arms.push(quote! {
-                            #opcode => Ok(Self::#variant_name),
-                        });
-                    }
-                    _ => {
-                        // For struct variants with named fields, we decode each field
-                        if let Fields::Named(named) = &variant.fields {
-                            let field_decoders = named
-                                .named
-                                .iter()
-                                .map(|field| {
-                                    let name = &field.ident;
-                                    let field_ty = &field.ty;
-                                    let decoder = decode_type(field_ty);
-                                    quote! { #name: #decoder?, }
-                                });
-                            match_arms.push(quote! {
-                                #opcode => {
-                                    let inner = Self::#variant_name { #(#field_decoders)* };
-                                    Ok(inner)
-                                },
-                            });
-                        } else {
-                            // Fallback for other field types
-                            match_arms.push(quote! {
-                                #opcode => {
-                                    let inner = ::pcore::Decode::decode(decoder)?;
-                                    Ok(Self::#variant_name(inner))
-                                },
-                            });
-                        }
-                    }
-                }
+            Fields::Unit => {
+                match_arms.push(quote! {
+                    #opcode => Ok(Self::#variant_name),
+                });
+            }
+            Fields::Named(named) => {
+                let field_decoders = named.named.iter().map(|field| {
+                    let field_name = &field.ident;
+                    let field_ty = &field.ty;
+                    let decoder = decode_type(field_ty);
+                    quote! { #field_name: #decoder?, }
+                });
+                match_arms.push(quote! {
+                    #opcode => {
+                        let inner = Self::#variant_name { #(#field_decoders)* };
+                        Ok(inner)
+                    },
+                });
+            }
+            Fields::Unnamed(_) => {
+                return Err(syn::Error::new_spanned(
+                    variant_name,
+                    format!(
+                        "variant `{variant_name}` has multiple unnamed fields; \
+                         use a single field or a struct variant"
+                    ),
+                ));
             }
         }
     }
 
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+    let lifetime = decode_lifetime(input)?;
 
-    let lifetime = match input.generics.lifetimes().next() {
-        Some(_) => quote! { #ty_generics },
-        None => quote! { <'_> },
-    };
-
-    TokenStream::from(quote! {
+    Ok(quote! {
         impl #impl_generics #name #ty_generics #where_clause {
             pub fn decode_by_opcode(opcode: i32, decoder: &mut ::pcore::decoder::Decoder #lifetime) -> Result<Self, ::pcore::errors::Error> {
                 match opcode {
@@ -151,6 +157,26 @@ pub fn derive_packet_enum(stream: TokenStream) -> TokenStream {
             }
         }
     })
+}
+
+/// Builds the lifetime argument for `Decode<...>`.
+///
+/// `Decode` takes exactly one lifetime, so a type with zero lifetimes gets
+/// `'_` and a type with one lifetime reuses it. More than one is rejected
+/// instead of silently emitting invalid code.
+fn decode_lifetime(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
+    let mut lifetimes = input.generics.lifetimes();
+    match (lifetimes.next(), lifetimes.next()) {
+        (None, _) => Ok(quote! { <'_> }),
+        (Some(first), None) => {
+            let lt = &first.lifetime;
+            Ok(quote! { <#lt> })
+        }
+        (Some(_), Some(second)) => Err(syn::Error::new_spanned(
+            &second.lifetime,
+            "Decode supports at most one lifetime parameter",
+        )),
+    }
 }
 
 /// Decode a single type field, returning TokenStream code to decode it.
@@ -166,7 +192,11 @@ fn decode_type(ty: &Type) -> proc_macro2::TokenStream {
             quote! { ::pcore::Decode::decode(decoder) }
         }
         Type::Path(path) => {
-            let segment = path.path.segments.last().expect("Type path must have a segment");
+            let segment = path
+                .path
+                .segments
+                .last()
+                .expect("Type path must have a segment");
             let name = segment.ident.to_string();
 
             // Handle Option<T>
@@ -241,28 +271,30 @@ fn extract_option_inner(ty: &Type) -> Option<Type> {
 }
 
 /// Process a struct's fields and generate the decode token stream.
-fn process_struct(data: &syn::Data) -> proc_macro2::TokenStream {
+fn process_struct(data: &syn::Data) -> syn::Result<proc_macro2::TokenStream> {
     let struct_ = match data {
         syn::Data::Struct(s) => s,
-        _ => panic!("Decode derive requires a struct"),
+        _ => {
+            return Err(syn::Error::new(
+                proc_macro2::Span::call_site(),
+                "Decode derive requires a struct",
+            ));
+        }
     };
 
-    match &struct_.fields {
+    Ok(match &struct_.fields {
         Fields::Named(fields) => {
-            let iter = fields
-                .named
-                .iter()
-                .map(|field| {
-                    let name = field
-                        .ident
-                        .as_ref()
-                        .expect("Struct field must have a name");
-                    let type_ = &field.ty;
-                    let match_ = decode_type(type_);
-                    quote! {
-                        #name: #match_?,
-                    }
-                });
+            let iter = fields.named.iter().map(|field| {
+                let name = field
+                    .ident
+                    .as_ref()
+                    .expect("Struct field must have a name");
+                let type_ = &field.ty;
+                let match_ = decode_type(type_);
+                quote! {
+                    #name: #match_?,
+                }
+            });
             quote! { Self { #(#iter)* } }
         }
         Fields::Unit => quote! { Self },
@@ -282,5 +314,5 @@ fn process_struct(data: &syn::Data) -> proc_macro2::TokenStream {
             });
             quote! { Self(#(#iter)*) }
         }
-    }
+    })
 }
