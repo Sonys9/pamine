@@ -50,13 +50,18 @@ impl Connector {
     }
 
     async fn get_stream(&self, addr: &SockAddr) -> eyre::Result<TcpStream> {
-        let socket = socket2::Socket::new(Domain::IPV4, Type::STREAM, None)?;
+        let domain = if addr.is_ipv6() {
+            Domain::IPV6
+        } else {
+            Domain::IPV4
+        };
+        let socket = socket2::Socket::new(domain, Type::STREAM, None)?;
         socket.set_mark(self.magic_number)?;
         socket.set_nonblocking(true)?;
         if let Err(e) = socket.connect(addr)
             && e.raw_os_error() != Some(UNAVAILABLE_ERR)
         {
-            eyre::bail!("Failed to init a connecton");
+            eyre::bail!("Failed to init a connection: {e}");
         };
         let target_stream = TcpStream::from_std(socket.into())?;
         tokio::select! {
@@ -94,37 +99,27 @@ impl Connector {
                     target_addr,
                 );
             };
-            let mut parser = parser.lock().await;
-            parser.update(side, &buffer[..len]);
-            /*
-            while let Ok(packet) = parser.try_parse(side) {
-                info!("parsed packet: {:?}", packet);
-                parser.clear(side);
-            };
-            */
-            loop {
-                match parser.try_parse(side) {
-                    Ok(packet) => {
-                        let str = format!("{:?}", packet);
-                        let mut iter = str.split("(");
-                        iter.next();
-                        iter.next();
-                        info!(
-                            "parsed packet: {:?} {:?} {}",
-                            iter.next().unwrap(),
-                            packet,
-                            str.len()
-                        );
-                        parser.clear(side);
-                    }
-                    Err(e) => {
-                        error!("{}", e);
+
+            // Scope the lock so it is released before the write below. Holding it
+            // across `write_all` would let a slow peer block the other direction.
+            {
+                let mut parser = parser.lock().await;
+                parser.update(side, &buffer[..len]);
+                loop {
+                    match parser.try_parse(side) {
+                        Ok(packet) => {
+                            info!("[{:?}] parsed packet: {:?}", side, packet);
+                            parser.clear(side);
+                        }
+                        Err(e) => {
+                            error!("[{:?}] {}", side, e);
+                            break;
+                        }
+                    };
+                    if parser.is_clear(side) {
                         break;
-                    }
-                };
-                if parser.is_clear(side) {
-                    break;
-                };
+                    };
+                }
             }
 
             target_stream.write_all(&buffer[..len]).await?;
