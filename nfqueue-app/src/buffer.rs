@@ -1,5 +1,3 @@
-use tracing::info;
-
 pub const BUFFER_LEN: usize = 1024 * 1024 * 2 + 1024 * 64; // 2 MB + 64 KB
 
 pub struct BigBuffer {

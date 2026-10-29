@@ -16,7 +16,7 @@ use tokio::{
 };
 use tracing::{error, info};
 
-use crate::packets::{Parser, Side, parser};
+use crate::packets::{Parser, Side};
 
 pub const UNAVAILABLE_ERR: i32 = 115;
 

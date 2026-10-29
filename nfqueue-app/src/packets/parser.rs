@@ -1,4 +1,4 @@
-use std::{borrow::Cow, io::Read, mem, slice::from_raw_parts};
+use std::io::Read;
 
 use crate::{
     buffer::BigBuffer,
@@ -7,9 +7,8 @@ use crate::{
         s2c::{self, packets::S2CPacket},
     },
 };
-use flate2::read::{GzDecoder, ZlibDecoder};
+use flate2::read::ZlibDecoder;
 use pcore::decoder::Decoder;
-use tracing::info;
 
 /*pub struct Session<'a> {
     side: Side,

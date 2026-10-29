@@ -1,4 +1,4 @@
-use pcore::{Decode, decoder::VarInt};
+use pcore::Decode;
 use pcore_gen::DecodePacket;
 
 #[derive(DecodePacket, Clone, Debug)]
