@@ -40,7 +40,7 @@ impl<'a> Decoder<'a> {
         let id = self.u8()?;
         if id != 0 {
             // The name is not used, but it occupies bytes on the wire.
-            let _root_name = self.nbt_string()?;
+            let _root_name = self.string_u16()?;
         }
         self.nbt_parse(id, 0)
     }
@@ -50,12 +50,6 @@ impl<'a> Decoder<'a> {
     /// `decoder` is taken by mutable reference: `Decoder` is `Copy`, so passing
     /// it by value would advance a copy and leave the caller's cursor untouched.
     fn nbt_parse(&mut self, id: u8, depth: usize) -> Result<NbtTag<'a>, Error> {
-        println!(
-            "current id: {} depth: {} next 8 bytes: {:?}",
-            id,
-            depth,
-            &self.get()[..self.get().len().min(8)]
-        );
         if depth > MAX_DEPTH {
             return Err(Error::Nbt("nesting too deep"));
         }
@@ -72,7 +66,7 @@ impl<'a> Decoder<'a> {
                 let len = self.nbt_array_len()?;
                 NbtTag::ByteArray(self.read_len(len)?)
             }
-            8 => NbtTag::String(self.nbt_string()?),
+            8 => NbtTag::String(self.string_u16()?),
             9 => {
                 let elements_id = self.u8()?;
                 let len = self.nbt_array_len()?;
@@ -97,7 +91,7 @@ impl<'a> Decoder<'a> {
                         // TAG_End terminates the compound.
                         break;
                     }
-                    let name = self.nbt_string()?;
+                    let name = self.string_u16()?;
                     let nbt = self.nbt_parse(id, depth + 1)?;
                     compound.push((name, nbt));
                 }
@@ -136,11 +130,6 @@ impl<'a> Decoder<'a> {
             return Err(Error::LenLimit(len));
         }
         Ok(len)
-    }
-
-    /// NBT strings are `u16` big-endian length + UTF-8 bytes, not VarInt-prefixed.
-    fn nbt_string(&mut self) -> Result<&'a str, Error> {
-        self.string_u16()
     }
 }
 
