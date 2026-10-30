@@ -2,7 +2,7 @@
 
 use pcore::{
     Decode,
-    decoder::{Decoder, VarInt},
+    decoder::{Decoder, VarInt, VarLong},
     errors::Error,
 };
 
@@ -15,7 +15,9 @@ pub struct InitializeWorldBorder {
     pub z: f64,
     pub old_diameter: f64,
     pub new_diameter: f64,
-    pub speed: i64,
+    /// Milliseconds until `new_diameter` is reached; `0` when not moving.
+    /// VarLong on the wire, not a fixed-width `i64`.
+    pub speed: VarLong,
     pub portal_teleport_boundary: VarInt,
     pub warning_blocks: VarInt,
     pub warning_time: VarInt,
@@ -31,7 +33,8 @@ pub struct SetBorderCenter {
 pub struct SetBorderLerpSize {
     pub old_diameter: f64,
     pub new_diameter: f64,
-    pub speed: i64,
+    /// Milliseconds until `new_diameter` is reached; `0` when not moving.
+    pub speed: VarLong,
 }
 
 #[derive(Decode, Debug, Clone)]
