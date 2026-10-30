@@ -46,12 +46,28 @@ pub struct OpenSignEditor {
     pub location: u64,
 }
 
-/// One changed block inside a section: a packed `position` VarLong and the new
-/// block state id.
+/// One changed block inside a section.
+///
+/// The whole entry is a **single** VarLong: the block state id is shifted left
+/// by 12 and the low 12 bits hold the relative position (4 bits each for x, z
+/// and y, from left to right). Reading the state as a separate VarInt consumes
+/// a byte that belongs to the next entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SectionBlock {
-    pub position: VarLong,
-    pub block_state: VarInt,
+    /// The raw packed value, as it appears on the wire.
+    pub packed: VarLong,
+}
+
+impl SectionBlock {
+    /// The new block state id.
+    pub fn block_state(&self) -> i64 {
+        self.packed.get() >> 12
+    }
+
+    /// The relative position inside the section: 4 bits each for x, z and y.
+    pub fn position(&self) -> i64 {
+        self.packed.get() & 0xFFF
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -67,8 +83,7 @@ impl<'a> Decode<'a> for UpdateSectionBlocks {
         let suppress_light_updates = decoder.bool()?;
         let blocks = counted(decoder, |d| {
             Ok(SectionBlock {
-                position: d.varlong()?,
-                block_state: d.varint()?,
+                packed: d.varlong()?,
             })
         })?;
         Ok(Self {
