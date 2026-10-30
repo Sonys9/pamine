@@ -1,15 +1,58 @@
 //! Clientbound play packets (protocol 760 / 1.19.2).
 //!
-//! Packet ids follow the 1.19.2 table. Fields that are variable-length arrays,
-//! NBT payloads or depend on a preceding discriminator are kept as raw `&[u8]`
-//! slices; the derive macro cannot express them without a custom `Decode` impl.
+//! Packet ids follow the 1.19.2 table. Fields whose layout depends on a
+//! preceding discriminator get a hand-written [`Decode`] impl; everything else
+//! uses the derive macro.
 
 use pcore::{
     Decode,
-    decoder::{Decoder, NbtTag, Uuid, VarInt},
+    decoder::{Decoder, MAX_ELEMENTS, NbtTag, Slot, Uuid, VarInt, VarLong},
     errors::Error,
 };
 use pcore_gen::DecodePacket;
+
+/// Reads a VarInt-counted array, decoding each element with `read`.
+///
+/// The count is validated against [`MAX_ELEMENTS`] before allocating, so a
+/// hostile packet cannot ask for a multi-gigabyte `Vec`.
+fn counted<'a, T>(
+    decoder: &mut Decoder<'a>,
+    read: impl Fn(&mut Decoder<'a>) -> Result<T, Error>,
+) -> Result<Vec<T>, Error> {
+    let count = decoder.varint()?.get();
+    if count < 0 {
+        return Err(Error::Read(0));
+    }
+    let count = count as usize;
+    if count > MAX_ELEMENTS {
+        return Err(Error::LenLimit(count));
+    }
+    let mut out = Vec::with_capacity(count);
+    for _ in 0..count {
+        out.push(read(decoder)?);
+    }
+    Ok(out)
+}
+
+/// Reads an "Optional Byte Array": a VarInt length where `0` means absent.
+fn optional_bytes<'a>(decoder: &mut Decoder<'a>) -> Result<Option<&'a [u8]>, Error> {
+    let bytes = decoder.slice()?;
+    Ok(if bytes.is_empty() { None } else { Some(bytes) })
+}
+
+/// Reads an "Optional Chat": a `bool` gate followed by a JSON string.
+fn optional_chat<'a>(decoder: &mut Decoder<'a>) -> Result<Option<&'a str>, Error> {
+    Ok(if decoder.bool()? {
+        Some(decoder.string()?)
+    } else {
+        None
+    })
+}
+
+/// Reads a VarInt-counted array of Identifiers (VarInt-prefixed strings).
+fn identifiers<'a>(decoder: &mut Decoder<'a>) -> Result<Vec<&'a str>, Error> {
+    counted(decoder, |d| d.string())
+}
 
 #[derive(DecodePacket, Clone, Debug)]
 pub enum Play<'a> {
@@ -68,7 +111,7 @@ pub enum Play<'a> {
     #[id(0x1A)]
     EntityEvent(EntityEvent),
     #[id(0x1B)]
-    Explosion(Explosion<'a>),
+    Explosion(Explosion),
     #[id(0x1C)]
     UnloadChunk(UnloadChunk),
     #[id(0x1D)]
@@ -132,7 +175,7 @@ pub enum Play<'a> {
     #[id(0x3A)]
     UpdateRecipeBook(UpdateRecipeBook<'a>),
     #[id(0x3B)]
-    RemoveEntities(RemoveEntities<'a>),
+    RemoveEntities(RemoveEntities),
     #[id(0x3C)]
     RemoveEntityEffect(RemoveEntityEffect),
     #[id(0x3D)]
@@ -142,7 +185,7 @@ pub enum Play<'a> {
     #[id(0x3F)]
     SetHeadRotation(SetHeadRotation),
     #[id(0x40)]
-    UpdateSectionBlocks(UpdateSectionBlocks<'a>),
+    UpdateSectionBlocks(UpdateSectionBlocks),
     #[id(0x41)]
     SelectAdvancementsTab(SelectAdvancementsTab<'a>),
     #[id(0x42)]
@@ -188,7 +231,7 @@ pub enum Play<'a> {
     #[id(0x56)]
     UpdateObjectives(UpdateObjectives<'a>),
     #[id(0x57)]
-    SetPassengers(SetPassengers<'a>),
+    SetPassengers(SetPassengers),
     #[id(0x58)]
     UpdateTeams(UpdateTeams<'a>),
     #[id(0x59)]
@@ -342,14 +385,64 @@ pub struct BlockUpdate {
     pub block_id: VarInt,
 }
 
-#[derive(Decode, Debug, Clone)]
+/// The `action`-dependent body of [`BossBar`].
+#[derive(Debug, Clone)]
+pub enum BossBarAction<'a> {
+    /// `0` — a new bar appears.
+    Add {
+        title: &'a str,
+        health: f32,
+        color: VarInt,
+        division: VarInt,
+        flags: u8,
+    },
+    /// `1` — the bar disappears; nothing follows.
+    Remove,
+    /// `2` — only the health changed.
+    UpdateHealth { health: f32 },
+    /// `3` — only the title changed.
+    UpdateTitle { title: &'a str },
+    /// `4` — only the colour and division changed.
+    UpdateStyle { color: VarInt, division: VarInt },
+    /// `5` — only the flags changed.
+    UpdateFlags { flags: u8 },
+}
+
+#[derive(Debug, Clone)]
 pub struct BossBar<'a> {
     pub uuid: Uuid,
-    pub action: VarInt,
-    /// Layout depends on `action` (add / remove / health / title / style /
-    /// flags), so the remainder is kept raw.
-    #[decode(rest)]
-    pub payload: &'a [u8],
+    pub action: BossBarAction<'a>,
+}
+
+impl<'a> Decode<'a> for BossBar<'a> {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        let uuid = decoder.uuid()?;
+        let action = match decoder.varint()?.get() {
+            0 => BossBarAction::Add {
+                title: decoder.string()?,
+                health: decoder.f32()?,
+                color: decoder.varint()?,
+                division: decoder.varint()?,
+                flags: decoder.u8()?,
+            },
+            1 => BossBarAction::Remove,
+            2 => BossBarAction::UpdateHealth {
+                health: decoder.f32()?,
+            },
+            3 => BossBarAction::UpdateTitle {
+                title: decoder.string()?,
+            },
+            4 => BossBarAction::UpdateStyle {
+                color: decoder.varint()?,
+                division: decoder.varint()?,
+            },
+            5 => BossBarAction::UpdateFlags {
+                flags: decoder.u8()?,
+            },
+            other => return Err(Error::UnknownOpcode(other)),
+        };
+        Ok(Self { uuid, action })
+    }
 }
 
 #[derive(Decode, Debug, Clone)]
@@ -370,14 +463,40 @@ pub struct ClearTitles {
     pub reset: bool,
 }
 
-#[derive(Decode, Debug, Clone)]
+/// One entry of a tab-completion response.
+#[derive(Debug, Clone)]
+pub struct SuggestionMatch<'a> {
+    pub text: &'a str,
+    /// The tooltip is a `bool`-gated chat component.
+    pub tooltip: Option<&'a str>,
+}
+
+#[derive(Debug, Clone)]
 pub struct CommandSuggestionsResponse<'a> {
     pub id: VarInt,
     pub start: VarInt,
     pub length: VarInt,
-    /// `count` matches, each `String + bool + optional tooltip`.
-    #[decode(rest)]
-    pub matches: &'a [u8],
+    pub matches: Vec<SuggestionMatch<'a>>,
+}
+
+impl<'a> Decode<'a> for CommandSuggestionsResponse<'a> {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        let id = decoder.varint()?;
+        let start = decoder.varint()?;
+        let length = decoder.varint()?;
+        let matches = counted(decoder, |d| {
+            Ok(SuggestionMatch {
+                text: d.string()?,
+                tooltip: optional_chat(d)?,
+            })
+        })?;
+        Ok(Self {
+            id,
+            start,
+            length,
+            matches,
+        })
+    }
 }
 
 /// The command graph. `nodes` is a VarInt **count** of variable-length node
@@ -472,15 +591,39 @@ pub struct CloseContainer {
     pub window_id: u8,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct SetContainerContent<'a> {
     pub window_id: u8,
     pub state_id: VarInt,
-    pub count: VarInt,
-    /// `count` Slot structures, then the carried Slot. Both are kept raw
-    /// because a Slot is `bool + VarInt id + i8 count + NBT`.
-    #[decode(rest)]
-    pub slots_and_carried: &'a [u8],
+    /// Every slot of the window, in order.
+    pub slots: Vec<Slot<'a>>,
+    /// The item held by the cursor.
+    pub carried_item: Slot<'a>,
+}
+
+impl<'a> Decode<'a> for SetContainerContent<'a> {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        let window_id = decoder.u8()?;
+        let state_id = decoder.varint()?;
+
+        // `count` is a VarInt, and each of the `count` slots is a full Slot.
+        let count = decoder.varint()?.get();
+        if count < 0 {
+            return Err(Error::Read(0));
+        }
+        let mut slots = Vec::with_capacity(count as usize);
+        for _ in 0..count {
+            slots.push(Slot::decode(decoder)?);
+        }
+        let carried_item = Slot::decode(decoder)?;
+
+        Ok(Self {
+            window_id,
+            state_id,
+            slots,
+            carried_item,
+        })
+    }
 }
 
 #[derive(Decode, Debug, Clone)]
@@ -496,8 +639,7 @@ pub struct SetContainerSlot<'a> {
     pub state_id: VarInt,
     pub slot: i16,
     /// A single Slot: `bool present + VarInt id + i8 count + NBT`.
-    #[decode(rest)]
-    pub slot_data: &'a [u8],
+    pub slot_data: Slot<'a>,
 }
 
 #[derive(Decode, Debug, Clone)]
@@ -506,18 +648,26 @@ pub struct SetCooldown {
     pub cooldown_ticks: VarInt,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct ChatSuggestions<'a> {
     pub action: VarInt,
-    pub count: VarInt,
-    pub entries: &'a [u8],
+    pub entries: Vec<&'a str>,
+}
+
+impl<'a> Decode<'a> for ChatSuggestions<'a> {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        let action = decoder.varint()?;
+        let entries = counted(decoder, |d| d.string())?;
+        Ok(Self { action, entries })
+    }
 }
 
 #[derive(Decode, Debug, Clone)]
 pub struct PluginMessage<'a> {
     pub channel: &'a str,
     /// Everything after the channel: the payload has no length prefix, its
-    /// length is whatever remains in the packet.
+    /// length is whatever remains in the packet. This is genuinely opaque —
+    /// the layout is defined by the plugin, not by the protocol.
     #[decode(rest)]
     pub data: &'a [u8],
 }
@@ -550,17 +700,48 @@ pub struct EntityEvent {
     pub entity_status: i8,
 }
 
-#[derive(Decode, Debug, Clone)]
-pub struct Explosion<'a> {
+/// One destroyed block, as a signed offset from the explosion centre.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExplosionRecord {
+    pub x: i8,
+    pub y: i8,
+    pub z: i8,
+}
+
+#[derive(Debug, Clone)]
+pub struct Explosion {
     pub x: f32,
     pub y: f32,
     pub z: f32,
     pub strength: f32,
-    pub record_count: VarInt,
-    /// `record_count` 3-byte offsets, then three player-motion floats. Kept
-    /// raw because the trailing floats follow a counted array.
-    #[decode(rest)]
-    pub records_and_motion: &'a [u8],
+    pub records: Vec<ExplosionRecord>,
+    /// The knockback applied to the player, one float per axis.
+    pub player_motion: [f32; 3],
+}
+
+impl<'a> Decode<'a> for Explosion {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        let x = decoder.f32()?;
+        let y = decoder.f32()?;
+        let z = decoder.f32()?;
+        let strength = decoder.f32()?;
+        let records = counted(decoder, |d| {
+            Ok(ExplosionRecord {
+                x: d.i8()?,
+                y: d.i8()?,
+                z: d.i8()?,
+            })
+        })?;
+        let player_motion = [decoder.f32()?, decoder.f32()?, decoder.f32()?];
+        Ok(Self {
+            x,
+            y,
+            z,
+            strength,
+            records,
+            player_motion,
+        })
+    }
 }
 
 #[derive(Decode, Debug, Clone)]
@@ -852,25 +1033,89 @@ impl<'a> Decode<'a> for Login<'a> {
     }
 }
 
-#[derive(Decode, Debug, Clone)]
+/// One marker drawn on a map.
+#[derive(Debug, Clone)]
+pub struct MapIcon<'a> {
+    /// `type << 4 | direction`, packed into a single byte.
+    pub kind_and_direction: u8,
+    pub x: i8,
+    pub z: i8,
+    /// A `bool`-gated display name.
+    pub display_name: Option<&'a str>,
+}
+
+#[derive(Debug, Clone)]
 pub struct MapData<'a> {
     pub map_id: VarInt,
     pub scale: i8,
     pub locked: bool,
-    pub tracking_position: bool,
-    /// Icon count + icons; only present when `tracking_position` is set, and
-    /// each icon is a fixed 3-byte record plus an optional display name.
-    #[decode(rest)]
-    pub icons: &'a [u8],
+    pub icons: Vec<MapIcon<'a>>,
 }
 
-#[derive(Decode, Debug, Clone)]
+impl<'a> Decode<'a> for MapData<'a> {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        let map_id = decoder.varint()?;
+        let scale = decoder.i8()?;
+        let locked = decoder.bool()?;
+        // The icon array is only on the wire when tracking is enabled; the
+        // count is a VarInt and `0` covers the "not tracking" case.
+        let icons = counted(decoder, |d| {
+            Ok(MapIcon {
+                kind_and_direction: d.u8()?,
+                x: d.i8()?,
+                z: d.i8()?,
+                display_name: optional_chat(d)?,
+            })
+        })?;
+        Ok(Self {
+            map_id,
+            scale,
+            locked,
+            icons,
+        })
+    }
+}
+
+/// One trade offered by a villager.
+#[derive(Debug, Clone)]
+pub struct TradeOffer<'a> {
+    pub input_item_1: Slot<'a>,
+    pub output_item: Slot<'a>,
+    pub input_item_2: Slot<'a>,
+    pub trade_disabled: bool,
+    pub number_of_trade_uses: i32,
+    pub maximum_number_of_trade_uses: i32,
+    pub xp: i32,
+    pub special_price: i32,
+    pub price_multiplier: f32,
+    pub demand: i32,
+}
+
+#[derive(Debug, Clone)]
 pub struct MerchantOffers<'a> {
     pub window_id: VarInt,
-    pub size: VarInt,
-    /// `size` trade structures, each with variable-length slots.
-    #[decode(rest)]
-    pub trades: &'a [u8],
+    pub trades: Vec<TradeOffer<'a>>,
+}
+
+impl<'a> Decode<'a> for MerchantOffers<'a> {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        let window_id = decoder.varint()?;
+        let trades = counted(decoder, |d| {
+            Ok(TradeOffer {
+                input_item_1: Slot::decode(d)?,
+                output_item: Slot::decode(d)?,
+                input_item_2: Slot::decode(d)?,
+                trade_disabled: d.bool()?,
+                number_of_trade_uses: d.i32()?,
+                maximum_number_of_trade_uses: d.i32()?,
+                xp: d.i32()?,
+                special_price: d.i32()?,
+                price_multiplier: d.f32()?,
+                demand: d.i32()?,
+            })
+        })?;
+        Ok(Self { window_id, trades })
+    }
 }
 
 #[derive(Decode, Debug, Clone)]
@@ -952,19 +1197,61 @@ pub struct MessageHeader<'a> {
     pub sender: Uuid,
 }
 
-#[derive(Decode, Debug, Clone)]
+/// A previously sent message, referenced by its id and signature.
+#[derive(Debug, Clone)]
+pub struct PreviousMessage<'a> {
+    pub message_id: VarInt,
+    pub signature: &'a [u8],
+}
+
+#[derive(Debug, Clone)]
 pub struct PlayerChatMessage<'a> {
     pub sender: Uuid,
     pub index: VarInt,
+    /// `None` when the signature length prefix is `0`.
     pub signature: Option<&'a [u8]>,
     pub message: &'a str,
     pub timestamp: i64,
     pub salt: i64,
-    pub previous_messages: &'a [u8],
+    pub previous_messages: Vec<PreviousMessage<'a>>,
     pub unsigned_content: Option<&'a str>,
     pub filter_type: VarInt,
     pub network_target: VarInt,
     pub network_name: &'a str,
+}
+
+impl<'a> Decode<'a> for PlayerChatMessage<'a> {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        let sender = decoder.uuid()?;
+        let index = decoder.varint()?;
+        let signature = optional_bytes(decoder)?;
+        let message = decoder.string()?;
+        let timestamp = decoder.i64()?;
+        let salt = decoder.i64()?;
+        let previous_messages = counted(decoder, |d| {
+            Ok(PreviousMessage {
+                message_id: d.varint()?,
+                signature: d.slice()?,
+            })
+        })?;
+        let unsigned_content = optional_chat(decoder)?;
+        let filter_type = decoder.varint()?;
+        let network_target = decoder.varint()?;
+        let network_name = decoder.string()?;
+        Ok(Self {
+            sender,
+            index,
+            signature,
+            message,
+            timestamp,
+            salt,
+            previous_messages,
+            unsigned_content,
+            filter_type,
+            network_target,
+            network_name,
+        })
+    }
 }
 
 #[derive(Decode, Debug, Clone)]
@@ -983,13 +1270,102 @@ pub struct CombatDeath<'a> {
     pub message: &'a str,
 }
 
-#[derive(Decode, Debug, Clone)]
+/// Bit flags of the `Player Info` action mask.
+pub const PLAYER_INFO_ADD_PLAYER: u8 = 0x01;
+pub const PLAYER_INFO_INITIALIZE_CHAT: u8 = 0x02;
+pub const PLAYER_INFO_UPDATE_GAME_MODE: u8 = 0x04;
+pub const PLAYER_INFO_UPDATE_LISTED: u8 = 0x08;
+pub const PLAYER_INFO_UPDATE_LATENCY: u8 = 0x10;
+pub const PLAYER_INFO_UPDATE_DISPLAY_NAME: u8 = 0x20;
+
+/// A signed skin/cape property.
+#[derive(Debug, Clone)]
+pub struct PlayerProperty<'a> {
+    pub name: &'a str,
+    pub value: &'a str,
+    pub signature: Option<&'a str>,
+}
+
+/// One player entry of `Player Info`. Every field past `uuid` is gated by the
+/// packet's `actions` bitmask, so absent fields stay `None`.
+#[derive(Debug, Clone)]
+pub struct PlayerInfoEntry<'a> {
+    pub uuid: Uuid,
+    pub name: Option<&'a str>,
+    pub properties: Option<Vec<PlayerProperty<'a>>>,
+    pub game_mode: Option<VarInt>,
+    pub listed: Option<bool>,
+    pub latency: Option<VarInt>,
+    pub display_name: Option<Option<&'a str>>,
+}
+
+#[derive(Debug, Clone)]
 pub struct PlayerInfo<'a> {
     pub actions: u8,
-    pub number_of_players: VarInt,
-    /// Per-player payload depends on the `actions` bitmask, so it is kept raw.
-    #[decode(rest)]
-    pub players: &'a [u8],
+    pub players: Vec<PlayerInfoEntry<'a>>,
+}
+
+impl<'a> Decode<'a> for PlayerInfo<'a> {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        let actions = decoder.u8()?;
+        let players = counted(decoder, |d| {
+            let uuid = d.uuid()?;
+
+            let (name, properties) = if actions & PLAYER_INFO_ADD_PLAYER != 0 {
+                let name = d.string()?;
+                let properties = counted(d, |d| {
+                    Ok(PlayerProperty {
+                        name: d.string()?,
+                        value: d.string()?,
+                        signature: if d.bool()? { Some(d.string()?) } else { None },
+                    })
+                })?;
+                (Some(name), Some(properties))
+            } else {
+                (None, None)
+            };
+
+            // The chat-initialisation block (session id + key signature) is
+            // skipped: it is opaque key material this proxy never inspects.
+            if actions & PLAYER_INFO_INITIALIZE_CHAT != 0 {
+                let _has_signature = d.bool()?;
+                let _session_id = d.uuid()?;
+                let _key_signature = d.slice()?;
+            }
+
+            let game_mode = if actions & PLAYER_INFO_UPDATE_GAME_MODE != 0 {
+                Some(d.varint()?)
+            } else {
+                None
+            };
+            let listed = if actions & PLAYER_INFO_UPDATE_LISTED != 0 {
+                Some(d.bool()?)
+            } else {
+                None
+            };
+            let latency = if actions & PLAYER_INFO_UPDATE_LATENCY != 0 {
+                Some(d.varint()?)
+            } else {
+                None
+            };
+            let display_name = if actions & PLAYER_INFO_UPDATE_DISPLAY_NAME != 0 {
+                Some(optional_chat(d)?)
+            } else {
+                None
+            };
+
+            Ok(PlayerInfoEntry {
+                uuid,
+                name,
+                properties,
+                game_mode,
+                listed,
+                latency,
+                display_name,
+            })
+        })?;
+        Ok(Self { actions, players })
+    }
 }
 
 #[derive(Decode, Debug, Clone)]
@@ -1015,7 +1391,7 @@ pub struct SynchronizePlayerPosition {
     pub dismount_vehicle: bool,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct UpdateRecipeBook<'a> {
     pub action: VarInt,
     pub crafting_book_open: bool,
@@ -1026,15 +1402,57 @@ pub struct UpdateRecipeBook<'a> {
     pub blast_furnace_filter_active: bool,
     pub smoker_open: bool,
     pub smoker_filter_active: bool,
-    /// One or two Identifier arrays depending on `action`.
-    #[decode(rest)]
-    pub recipe_ids: &'a [u8],
+    /// Recipes being added or removed.
+    pub recipe_ids: Vec<&'a str>,
+    /// Only present for `action == 0` (init), where it lists what is already
+    /// known.
+    pub already_known: Option<Vec<&'a str>>,
 }
 
-#[derive(Decode, Debug, Clone)]
-pub struct RemoveEntities<'a> {
-    pub count: VarInt,
-    pub entity_ids: &'a [u8],
+impl<'a> Decode<'a> for UpdateRecipeBook<'a> {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        let action = decoder.varint()?;
+        let crafting_book_open = decoder.bool()?;
+        let crafting_filter_active = decoder.bool()?;
+        let smelting_book_open = decoder.bool()?;
+        let smelting_filter_active = decoder.bool()?;
+        let blast_furnace_open = decoder.bool()?;
+        let blast_furnace_filter_active = decoder.bool()?;
+        let smoker_open = decoder.bool()?;
+        let smoker_filter_active = decoder.bool()?;
+        let recipe_ids = identifiers(decoder)?;
+        // Only the "init" action carries the second array.
+        let already_known = if action.get() == 0 {
+            Some(identifiers(decoder)?)
+        } else {
+            None
+        };
+        Ok(Self {
+            action,
+            crafting_book_open,
+            crafting_filter_active,
+            smelting_book_open,
+            smelting_filter_active,
+            blast_furnace_open,
+            blast_furnace_filter_active,
+            smoker_open,
+            smoker_filter_active,
+            recipe_ids,
+            already_known,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RemoveEntities {
+    pub entity_ids: Vec<VarInt>,
+}
+
+impl<'a> Decode<'a> for RemoveEntities {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        let entity_ids = counted(decoder, |d| d.varint())?;
+        Ok(Self { entity_ids })
+    }
 }
 
 #[derive(Decode, Debug, Clone)]
@@ -1073,13 +1491,37 @@ pub struct SetHeadRotation {
     pub head_yaw: u8,
 }
 
-#[derive(Decode, Debug, Clone)]
-pub struct UpdateSectionBlocks<'a> {
+/// One changed block inside a section: a packed `position` VarLong and the new
+/// block state id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SectionBlock {
+    pub position: VarLong,
+    pub block_state: VarInt,
+}
+
+#[derive(Debug, Clone)]
+pub struct UpdateSectionBlocks {
     pub chunk_section_position: i64,
     pub suppress_light_updates: bool,
-    pub blocks_array_size: VarInt,
-    #[decode(rest)]
-    pub blocks: &'a [u8],
+    pub blocks: Vec<SectionBlock>,
+}
+
+impl<'a> Decode<'a> for UpdateSectionBlocks {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        let chunk_section_position = decoder.i64()?;
+        let suppress_light_updates = decoder.bool()?;
+        let blocks = counted(decoder, |d| {
+            Ok(SectionBlock {
+                position: d.varlong()?,
+                block_state: d.varint()?,
+            })
+        })?;
+        Ok(Self {
+            chunk_section_position,
+            suppress_light_updates,
+            blocks,
+        })
+    }
 }
 
 #[derive(Decode, Debug, Clone)]
@@ -1169,13 +1611,110 @@ pub struct DisplayObjective<'a> {
     pub score_name: &'a str,
 }
 
-#[derive(Decode, Debug, Clone)]
+/// One metadata entry. The value type is chosen by the entry's index, so the
+/// payload is kept as a typed enum rather than raw bytes.
+#[derive(Debug, Clone)]
+pub struct MetadataEntry<'a> {
+    pub index: u8,
+    pub value: MetadataValue<'a>,
+}
+
+/// The metadata value types of protocol 760.
+#[derive(Debug, Clone)]
+pub enum MetadataValue<'a> {
+    Byte(i8),
+    VarInt(VarInt),
+    Float(f32),
+    String(&'a str),
+    Chat(&'a str),
+    OptChat(Option<&'a str>),
+    Slot(Slot<'a>),
+    Boolean(bool),
+    Rotation([f32; 3]),
+    Position(u64),
+    OptPosition(Option<u64>),
+    Direction(VarInt),
+    OptUuid(Option<Uuid>),
+    OptBlockId(Option<VarInt>),
+    Nbt(NbtTag<'a>),
+    Particle,
+    VillagerData { kind: VarInt, profession: VarInt, level: VarInt },
+    OptVarInt(Option<VarInt>),
+    Pose(VarInt),
+}
+
+impl<'a> MetadataValue<'a> {
+    /// Reads the value for metadata index `index`.
+    fn read(decoder: &mut Decoder<'a>, index: u8) -> Result<Self, Error> {
+        Ok(match index {
+            0 => Self::Byte(decoder.i8()?),
+            1 => Self::VarInt(decoder.varint()?),
+            2 => Self::Float(decoder.f32()?),
+            3 => Self::String(decoder.string()?),
+            4 => Self::Chat(decoder.string()?),
+            5 => Self::OptChat(optional_chat(decoder)?),
+            6 => Self::Slot(Slot::decode(decoder)?),
+            7 => Self::Boolean(decoder.bool()?),
+            8 => Self::Rotation([decoder.f32()?, decoder.f32()?, decoder.f32()?]),
+            9 => Self::Position(decoder.u64()?),
+            10 => Self::OptPosition(if decoder.bool()? {
+                Some(decoder.u64()?)
+            } else {
+                None
+            }),
+            11 => Self::Direction(decoder.varint()?),
+            12 => Self::OptUuid(if decoder.bool()? {
+                Some(decoder.uuid()?)
+            } else {
+                None
+            }),
+            13 => Self::OptBlockId(if decoder.varint()?.get() == 0 {
+                None
+            } else {
+                Some(decoder.varint()?)
+            }),
+            14 => Self::Nbt(decoder.nbt()?),
+            // Index 15 is a particle: its layout depends on the particle id,
+            // which this proxy does not model, so it is rejected rather than
+            // silently mis-parsed.
+            15 => return Err(Error::Nbt("particle metadata is not supported")),
+            16 => Self::VillagerData {
+                kind: decoder.varint()?,
+                profession: decoder.varint()?,
+                level: decoder.varint()?,
+            },
+            17 => Self::OptVarInt(if decoder.bool()? {
+                Some(decoder.varint()?)
+            } else {
+                None
+            }),
+            18 => Self::Pose(decoder.varint()?),
+            other => return Err(Error::UnknownOpcode(other as i32)),
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct SetEntityMetadata<'a> {
     pub entity_id: VarInt,
-    /// Entries run until a `0xFF` terminator; kept raw because each entry's
-    /// value type depends on its index.
-    #[decode(rest)]
-    pub metadata: &'a [u8],
+    pub metadata: Vec<MetadataEntry<'a>>,
+}
+
+impl<'a> Decode<'a> for SetEntityMetadata<'a> {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        let entity_id = decoder.varint()?;
+        let mut metadata = Vec::new();
+        // Entries are terminated by a `0xFF` index byte.
+        loop {
+            let index = decoder.u8()?;
+            if index == 0xFF {
+                break;
+            }
+            let value = MetadataValue::read(decoder, index)?;
+            metadata.push(MetadataEntry { index, value });
+        }
+        Ok(Self { entity_id, metadata })
+    }
 }
 
 #[derive(Decode, Debug, Clone)]
@@ -1192,12 +1731,38 @@ pub struct SetEntityVelocity {
     pub velocity_z: i16,
 }
 
-#[derive(Decode, Debug, Clone)]
+/// One equipped item. `slot` is the raw equipment-slot id (0-5).
+#[derive(Debug, Clone)]
+pub struct EquipmentEntry<'a> {
+    pub slot: i8,
+    pub item: Slot<'a>,
+}
+
+#[derive(Debug, Clone)]
 pub struct SetEquipment<'a> {
     pub entity_id: VarInt,
-    /// `(slot | 0x80 if more follow, Slot)` pairs, kept raw.
-    #[decode(rest)]
-    pub equipment: &'a [u8],
+    pub equipment: Vec<EquipmentEntry<'a>>,
+}
+
+impl<'a> Decode<'a> for SetEquipment<'a> {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        let entity_id = decoder.varint()?;
+        let mut equipment = Vec::new();
+        // The high bit of the slot byte means "another entry follows".
+        loop {
+            let raw = decoder.i8()?;
+            let slot = raw & 0x7F;
+            let item = Slot::decode(decoder)?;
+            equipment.push(EquipmentEntry { slot, item });
+            if raw & 0x80u8 as i8 == 0 {
+                break;
+            }
+        }
+        Ok(Self {
+            entity_id,
+            equipment,
+        })
+    }
 }
 
 #[derive(Decode, Debug, Clone)]
@@ -1222,21 +1787,95 @@ pub struct UpdateObjectives<'a> {
     pub kind: Option<VarInt>,
 }
 
-#[derive(Decode, Debug, Clone)]
-pub struct SetPassengers<'a> {
+#[derive(Debug, Clone)]
+pub struct SetPassengers {
     pub entity_id: VarInt,
-    pub passenger_count: VarInt,
-    pub passengers: &'a [u8],
+    pub passengers: Vec<VarInt>,
 }
 
-#[derive(Decode, Debug, Clone)]
+impl<'a> Decode<'a> for SetPassengers {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        let entity_id = decoder.varint()?;
+        let passengers = counted(decoder, |d| d.varint())?;
+        Ok(Self {
+            entity_id,
+            passengers,
+        })
+    }
+}
+
+/// The `mode`-dependent body of [`UpdateTeams`].
+#[derive(Debug, Clone)]
+pub enum TeamAction<'a> {
+    /// `0` — a new team is created.
+    Create {
+        display_name: &'a str,
+        friendly_flags: u8,
+        name_tag_visibility: &'a str,
+        collision_rule: &'a str,
+        color: VarInt,
+        prefix: &'a str,
+        suffix: &'a str,
+        entities: Vec<&'a str>,
+    },
+    /// `1` — the team is removed; nothing follows.
+    Remove,
+    /// `2` — only the display metadata changed.
+    Update {
+        display_name: &'a str,
+        friendly_flags: u8,
+        name_tag_visibility: &'a str,
+        collision_rule: &'a str,
+        color: VarInt,
+        prefix: &'a str,
+        suffix: &'a str,
+    },
+    /// `3` — entities joined the team.
+    AddEntities { entities: Vec<&'a str> },
+    /// `4` — entities left the team.
+    RemoveEntities { entities: Vec<&'a str> },
+}
+
+#[derive(Debug, Clone)]
 pub struct UpdateTeams<'a> {
     pub team_name: &'a str,
-    pub mode: u8,
-    /// Layout depends on `mode` (create / remove / update / add / remove
-    /// entities), so the remainder is kept raw.
-    #[decode(rest)]
-    pub payload: &'a [u8],
+    pub action: TeamAction<'a>,
+}
+
+impl<'a> Decode<'a> for UpdateTeams<'a> {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        let team_name = decoder.string()?;
+        let action = match decoder.u8()? {
+            0 => TeamAction::Create {
+                display_name: decoder.string()?,
+                friendly_flags: decoder.u8()?,
+                name_tag_visibility: decoder.string()?,
+                collision_rule: decoder.string()?,
+                color: decoder.varint()?,
+                prefix: decoder.string()?,
+                suffix: decoder.string()?,
+                entities: identifiers(decoder)?,
+            },
+            1 => TeamAction::Remove,
+            2 => TeamAction::Update {
+                display_name: decoder.string()?,
+                friendly_flags: decoder.u8()?,
+                name_tag_visibility: decoder.string()?,
+                collision_rule: decoder.string()?,
+                color: decoder.varint()?,
+                prefix: decoder.string()?,
+                suffix: decoder.string()?,
+            },
+            3 => TeamAction::AddEntities {
+                entities: identifiers(decoder)?,
+            },
+            4 => TeamAction::RemoveEntities {
+                entities: identifiers(decoder)?,
+            },
+            other => return Err(Error::UnknownOpcode(other as i32)),
+        };
+        Ok(Self { team_name, action })
+    }
 }
 
 #[derive(Decode, Debug, Clone)]
@@ -1340,21 +1979,159 @@ pub struct TeleportEntity {
     pub on_ground: bool,
 }
 
-#[derive(Decode, Debug, Clone)]
-pub struct UpdateAdvancements<'a> {
-    pub reset: bool,
-    pub mapping_size: VarInt,
-    /// Three nested variable-length sections; kept raw as a whole.
-    #[decode(rest)]
-    pub payload: &'a [u8],
+/// One advancement's progress.
+#[derive(Debug, Clone)]
+pub struct AdvancementProgress<'a> {
+    pub id: &'a str,
+    /// `None` when the advancement has no parent.
+    pub parent_id: Option<&'a str>,
+    /// `None` when the advancement has no display data.
+    pub display: Option<AdvancementDisplay<'a>>,
+    pub criteria: Vec<&'a str>,
 }
 
-#[derive(Decode, Debug, Clone)]
+/// The display block of an advancement.
+#[derive(Debug, Clone)]
+pub struct AdvancementDisplay<'a> {
+    pub title: &'a str,
+    pub description: &'a str,
+    pub icon: Slot<'a>,
+    pub frame_type: VarInt,
+    pub flags: i32,
+    /// Only present when the `0x01` flag (has background) is set.
+    pub background_texture: Option<&'a str>,
+    pub x_coord: f32,
+    pub y_coord: f32,
+}
+
+/// One advancement that was removed or whose progress changed.
+#[derive(Debug, Clone)]
+pub struct AdvancementRemoval<'a> {
+    pub id: &'a str,
+}
+
+#[derive(Debug, Clone)]
+pub struct UpdateAdvancements<'a> {
+    pub reset: bool,
+    pub added: Vec<AdvancementProgress<'a>>,
+    pub removed: Vec<&'a str>,
+    pub progress: Vec<AdvancementProgressUpdate<'a>>,
+}
+
+/// A progress-only update: the advancement id plus its completed criteria.
+#[derive(Debug, Clone)]
+pub struct AdvancementProgressUpdate<'a> {
+    pub id: &'a str,
+    pub criteria: Vec<&'a str>,
+}
+
+impl<'a> Decode<'a> for UpdateAdvancements<'a> {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        let reset = decoder.bool()?;
+
+        let added = counted(decoder, |d| {
+            let id = d.string()?;
+            let parent_id = if d.bool()? { Some(d.string()?) } else { None };
+            let display = if d.bool()? {
+                let title = d.string()?;
+                let description = d.string()?;
+                let icon = Slot::decode(d)?;
+                let frame_type = d.varint()?;
+                let flags = d.i32()?;
+                // Bit 0 of `flags` marks a background texture.
+                let background_texture = if flags & 0x01 != 0 {
+                    Some(d.string()?)
+                } else {
+                    None
+                };
+                let x_coord = d.f32()?;
+                let y_coord = d.f32()?;
+                Some(AdvancementDisplay {
+                    title,
+                    description,
+                    icon,
+                    frame_type,
+                    flags,
+                    background_texture,
+                    x_coord,
+                    y_coord,
+                })
+            } else {
+                None
+            };
+            let criteria = identifiers(d)?;
+            Ok(AdvancementProgress {
+                id,
+                parent_id,
+                display,
+                criteria,
+            })
+        })?;
+
+        let removed = identifiers(decoder)?;
+
+        let progress = counted(decoder, |d| {
+            Ok(AdvancementProgressUpdate {
+                id: d.string()?,
+                criteria: identifiers(d)?,
+            })
+        })?;
+
+        Ok(Self {
+            reset,
+            added,
+            removed,
+            progress,
+        })
+    }
+}
+
+/// One attribute modifier.
+#[derive(Debug, Clone)]
+pub struct AttributeModifier {
+    pub uuid: Uuid,
+    pub amount: f64,
+    pub operation: u8,
+}
+
+/// One attribute of an entity, with its base value and modifiers.
+#[derive(Debug, Clone)]
+pub struct AttributeEntry<'a> {
+    pub key: &'a str,
+    pub value: f64,
+    pub modifiers: Vec<AttributeModifier>,
+}
+
+#[derive(Debug, Clone)]
 pub struct UpdateAttributes<'a> {
     pub entity_id: VarInt,
-    pub number_of_properties: VarInt,
-    #[decode(rest)]
-    pub properties: &'a [u8],
+    pub properties: Vec<AttributeEntry<'a>>,
+}
+
+impl<'a> Decode<'a> for UpdateAttributes<'a> {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        let entity_id = decoder.varint()?;
+        let properties = counted(decoder, |d| {
+            let key = d.string()?;
+            let value = d.f64()?;
+            let modifiers = counted(d, |d| {
+                Ok(AttributeModifier {
+                    uuid: d.uuid()?,
+                    amount: d.f64()?,
+                    operation: d.u8()?,
+                })
+            })?;
+            Ok(AttributeEntry {
+                key,
+                value,
+                modifiers,
+            })
+        })?;
+        Ok(Self {
+            entity_id,
+            properties,
+        })
+    }
 }
 
 #[derive(Decode, Debug, Clone)]
@@ -1368,16 +2145,69 @@ pub struct EntityEffect<'a> {
     pub factor_data: Option<NbtTag<'a>>,
 }
 
-#[derive(Decode, Debug, Clone)]
-pub struct UpdateRecipes<'a> {
-    pub num_recipes: VarInt,
-    #[decode(rest)]
-    pub recipes: &'a [u8],
+/// One recipe: an identifier plus an opaque, type-dependent payload.
+#[derive(Debug, Clone)]
+pub struct Recipe<'a> {
+    pub id: &'a str,
+    /// The recipe body. Its layout depends on the recipe `type`, which is a
+    /// registry entry this proxy does not model, so the bytes are kept as-is.
+    pub data: &'a [u8],
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Debug, Clone)]
+pub struct UpdateRecipes<'a> {
+    pub recipes: Vec<Recipe<'a>>,
+}
+
+impl<'a> Decode<'a> for UpdateRecipes<'a> {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        let recipes = counted(decoder, |d| {
+            let id = d.string()?;
+            // The recipe type is a VarInt registry id; the body that follows
+            // has no length prefix, so it cannot be delimited without knowing
+            // every recipe type. The whole packet is therefore consumed here.
+            let _recipe_type = d.varint()?;
+            Ok(Recipe {
+                id,
+                data: d.rest(),
+            })
+        })?;
+        Ok(Self { recipes })
+    }
+}
+
+/// One named tag group: an identifier and the entries it contains.
+#[derive(Debug, Clone)]
+pub struct TagGroup<'a> {
+    pub name: &'a str,
+    pub entries: Vec<VarInt>,
+}
+
+/// All tag groups of one registry type.
+#[derive(Debug, Clone)]
+pub struct TagRegistry<'a> {
+    pub registry: &'a str,
+    pub tags: Vec<TagGroup<'a>>,
+}
+
+#[derive(Debug, Clone)]
 pub struct UpdateTags<'a> {
-    pub length_of_the_array: VarInt,
-    #[decode(rest)]
-    pub tags: &'a [u8],
+    pub registries: Vec<TagRegistry<'a>>,
+}
+
+impl<'a> Decode<'a> for UpdateTags<'a> {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        let registries = counted(decoder, |d| {
+            Ok(TagRegistry {
+                registry: d.string()?,
+                tags: counted(d, |d| {
+                    Ok(TagGroup {
+                        name: d.string()?,
+                        entries: counted(d, |d| d.varint())?,
+                    })
+                })?,
+            })
+        })?;
+        Ok(Self { registries })
+    }
 }

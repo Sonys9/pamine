@@ -1,14 +1,44 @@
 //! Serverbound play packets (protocol 760 / 1.19.2).
 //!
-//! Packet ids follow the 1.19.2 table. Fields that are variable-length arrays or
-//! depend on a preceding discriminator are kept as raw `&[u8]` slices; the
-//! decoder cannot express them without a custom `Decode` impl.
+//! Packet ids follow the 1.19.2 table. Fields whose layout depends on a
+//! preceding discriminator get a hand-written [`Decode`] impl; everything else
+//! uses the derive macro.
 
 use pcore::{
     Decode,
-    decoder::{Uuid, VarInt},
+    decoder::{Decoder, MAX_ELEMENTS, Slot, Uuid, VarInt},
+    errors::Error,
 };
 use pcore_gen::DecodePacket;
+
+/// Reads an "Optional Byte Array": a VarInt length where `0` means absent.
+fn optional_bytes<'a>(decoder: &mut Decoder<'a>) -> Result<Option<&'a [u8]>, Error> {
+    let bytes = decoder.slice()?;
+    Ok(if bytes.is_empty() { None } else { Some(bytes) })
+}
+
+/// Reads a VarInt-counted array, decoding each element with `read`.
+///
+/// The count is validated against [`MAX_ELEMENTS`] before allocating, so a
+/// hostile packet cannot ask for a multi-gigabyte `Vec`.
+fn counted<'a, T>(
+    decoder: &mut Decoder<'a>,
+    read: impl Fn(&mut Decoder<'a>) -> Result<T, Error>,
+) -> Result<Vec<T>, Error> {
+    let count = decoder.varint()?.get();
+    if count < 0 {
+        return Err(Error::Read(0));
+    }
+    let count = count as usize;
+    if count > MAX_ELEMENTS {
+        return Err(Error::LenLimit(count));
+    }
+    let mut out = Vec::with_capacity(count);
+    for _ in 0..count {
+        out.push(read(decoder)?);
+    }
+    Ok(out)
+}
 
 #[derive(DecodePacket, Clone, Debug)]
 pub enum Play<'a> {
@@ -132,35 +162,147 @@ pub struct ChangeDifficulty {
     pub difficulty: u8,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct MessageAcknowledgment<'a> {
+    pub message_count: VarInt,
     pub has_data: bool,
-    /// `profile_id` + `last_signature` when `has_data` is set. Kept raw
-    /// because the signature is VarInt-length-prefixed, not bool-gated.
-    #[decode(rest)]
-    pub data: &'a [u8],
+    /// Only present when `has_data` is set.
+    pub profile_id: Option<Uuid>,
+    /// Only present when `has_data` is set; `None` when the length is `0`.
+    pub last_signature: Option<&'a [u8]>,
 }
 
-#[derive(Decode, Debug, Clone)]
+impl<'a> Decode<'a> for MessageAcknowledgment<'a> {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        let message_count = decoder.varint()?;
+        let has_data = decoder.bool()?;
+        let (profile_id, last_signature) = if has_data {
+            (Some(decoder.uuid()?), optional_bytes(decoder)?)
+        } else {
+            (None, None)
+        };
+        Ok(Self {
+            message_count,
+            has_data,
+            profile_id,
+            last_signature,
+        })
+    }
+}
+
+/// One `(argument name, signature)` pair of a signed chat command.
+#[derive(Debug, Clone)]
+pub struct ArgumentSignature<'a> {
+    pub name: &'a str,
+    pub signature: &'a [u8],
+}
+
+/// A previously seen chat message, referenced by its signature and id.
+#[derive(Debug, Clone)]
+pub struct LastSeenMessage<'a> {
+    pub signature: &'a [u8],
+    pub message_id: VarInt,
+}
+
+/// The most recently received chat message.
+#[derive(Debug, Clone)]
+pub struct LastReceived<'a> {
+    pub message_id: VarInt,
+    pub signature: &'a [u8],
+}
+
+#[derive(Debug, Clone)]
 pub struct ChatCommand<'a> {
     pub command: &'a str,
     pub timestamp: i64,
     pub salt: i64,
-    /// VarInt count of `(name, signature)` pairs, then `signed_preview`.
-    /// Kept raw because the count is an element count.
-    #[decode(rest)]
-    pub argument_signatures: &'a [u8],
+    pub argument_signatures: Vec<ArgumentSignature<'a>>,
+    pub signed_preview: bool,
+    pub last_seen_messages: Vec<LastSeenMessage<'a>>,
+    pub last_received: Option<LastReceived<'a>>,
 }
 
-#[derive(Decode, Debug, Clone)]
+impl<'a> Decode<'a> for ChatCommand<'a> {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        let command = decoder.string()?;
+        let timestamp = decoder.i64()?;
+        let salt = decoder.i64()?;
+        let argument_signatures = counted(decoder, |d| {
+            Ok(ArgumentSignature {
+                name: d.string()?,
+                signature: d.slice()?,
+            })
+        })?;
+        let signed_preview = decoder.bool()?;
+        let last_seen_messages = counted(decoder, |d| {
+            Ok(LastSeenMessage {
+                signature: d.slice()?,
+                message_id: d.varint()?,
+            })
+        })?;
+        let last_received = if decoder.bool()? {
+            Some(LastReceived {
+                message_id: decoder.varint()?,
+                signature: decoder.slice()?,
+            })
+        } else {
+            None
+        };
+        Ok(Self {
+            command,
+            timestamp,
+            salt,
+            argument_signatures,
+            signed_preview,
+            last_seen_messages,
+            last_received,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct ChatMessage<'a> {
     pub message: &'a str,
     pub timestamp: i64,
     pub salt: i64,
-    /// Signature length + bytes, then `signed_preview` and the seen-message
-    /// list. Kept raw because the length prefix is a VarInt, not a bool.
-    #[decode(rest)]
-    pub signature_and_rest: &'a [u8],
+    /// `None` when the signature length prefix is `0`.
+    pub signature: Option<&'a [u8]>,
+    pub signed_preview: bool,
+    pub last_seen_messages: Vec<LastSeenMessage<'a>>,
+    pub last_received: Option<LastReceived<'a>>,
+}
+
+impl<'a> Decode<'a> for ChatMessage<'a> {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        let message = decoder.string()?;
+        let timestamp = decoder.i64()?;
+        let salt = decoder.i64()?;
+        let signature = optional_bytes(decoder)?;
+        let signed_preview = decoder.bool()?;
+        let last_seen_messages = counted(decoder, |d| {
+            Ok(LastSeenMessage {
+                signature: d.slice()?,
+                message_id: d.varint()?,
+            })
+        })?;
+        let last_received = if decoder.bool()? {
+            Some(LastReceived {
+                message_id: decoder.varint()?,
+                signature: decoder.slice()?,
+            })
+        } else {
+            None
+        };
+        Ok(Self {
+            message,
+            timestamp,
+            salt,
+            signature,
+            signed_preview,
+            last_seen_messages,
+            last_received,
+        })
+    }
 }
 
 #[derive(Decode, Debug, Clone)]
@@ -198,16 +340,49 @@ pub struct ClickContainerButton {
     pub button_id: u8,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct ClickContainer<'a> {
     pub window_id: u8,
     pub state_id: VarInt,
     pub slot: i16,
     pub button: i8,
     pub mode: VarInt,
-    /// VarInt count of `(slot, Slot)` pairs, then the carried Slot.
-    #[decode(rest)]
-    pub changed_slots_and_carried: &'a [u8],
+    /// `(slot number, Slot)` pairs the client changed.
+    pub changed_slots: Vec<(i16, Slot<'a>)>,
+    /// The item still held by the cursor after the click.
+    pub carried_item: Slot<'a>,
+}
+
+impl<'a> Decode<'a> for ClickContainer<'a> {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        let window_id = decoder.u8()?;
+        let state_id = decoder.varint()?;
+        let slot = decoder.i16()?;
+        let button = decoder.i8()?;
+        let mode = decoder.varint()?;
+
+        // The count is a VarInt, and each entry is a bare i16 followed by a Slot.
+        let count = decoder.varint()?.get();
+        if count < 0 {
+            return Err(Error::Read(0));
+        }
+        let mut changed_slots = Vec::with_capacity(count as usize);
+        for _ in 0..count {
+            let index = decoder.i16()?;
+            changed_slots.push((index, Slot::decode(decoder)?));
+        }
+        let carried_item = Slot::decode(decoder)?;
+
+        Ok(Self {
+            window_id,
+            state_id,
+            slot,
+            button,
+            mode,
+            changed_slots,
+            carried_item,
+        })
+    }
 }
 
 #[derive(Decode, Debug, Clone)]
@@ -221,12 +396,25 @@ pub struct PluginMessage<'a> {
     pub data: &'a [u8],
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct EditBook<'a> {
     pub slot: VarInt,
-    /// VarInt count of pages, then `has_title` and the optional title.
-    #[decode(rest)]
-    pub entries: &'a [u8],
+    pub pages: Vec<&'a str>,
+    /// `None` when the client cleared the title.
+    pub title: Option<&'a str>,
+}
+
+impl<'a> Decode<'a> for EditBook<'a> {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        let slot = decoder.varint()?;
+        let pages = counted(decoder, |d| d.string())?;
+        let title = if decoder.bool()? {
+            Some(decoder.string()?)
+        } else {
+            None
+        };
+        Ok(Self { slot, pages, title })
+    }
 }
 
 #[derive(Decode, Debug, Clone)]
@@ -417,8 +605,7 @@ pub struct ProgramCommandBlockMinecart<'a> {
 pub struct SetCreativeModeSlot<'a> {
     pub slot: i16,
     /// A single Slot: `bool present + VarInt id + i8 count + NBT`.
-    #[decode(rest)]
-    pub clicked_item: &'a [u8],
+    pub clicked_item: Slot<'a>,
 }
 
 #[derive(Decode, Debug, Clone)]

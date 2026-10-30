@@ -9,11 +9,13 @@
 //! - [`primitives`] — fixed-width big-endian scalars (`u8`…`f64`, `bool`)
 //! - [`string`] — VarInt-prefixed `&[u8]`, `&str` and `Vec<u8>`
 //! - [`uuid`] — 16-byte UUID
+//! - [`slot`] — inventory slot (`bool + VarInt id + i8 count + NBT`)
 //! - [`nbt`] — Named Binary Tag, self-describing on the wire
 
 pub mod decoder;
 pub mod nbt;
 pub mod primitives;
+pub mod slot;
 pub mod string;
 pub mod uuid;
 pub mod varint;
@@ -23,5 +25,6 @@ mod tests;
 
 pub use decoder::Decoder;
 pub use nbt::{MAX_DEPTH, MAX_ELEMENTS, NbtTag};
+pub use slot::Slot;
 pub use uuid::Uuid;
 pub use varint::{VarInt, VarLong};

@@ -45,7 +45,7 @@ impl<'a> Decoder<'a> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VarInt {
     pub number: i32,
 }
@@ -62,7 +62,7 @@ impl VarInt {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VarLong {
     pub number: i64,
 }
