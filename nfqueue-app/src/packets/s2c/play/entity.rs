@@ -2,7 +2,7 @@
 
 use pcore::{
     Decode,
-    decoder::{Decoder, NbtTag, Slot, Uuid, VarInt, VarLong},
+    decoder::{Decoder, NbtTag, Slot, Uuid, VarInt},
     errors::Error,
 };
 
@@ -177,11 +177,15 @@ pub struct MetadataEntry<'a> {
 }
 
 /// The metadata value types of protocol 760.
+///
+/// This is the **1.19.2** table (ids 0-18). It is not the modern one: 1.20.5
+/// inserted `VarLong`, `BlockState`, `OptBlockState` and `Particles` and shifted
+/// everything after `Float`, so using the newer table desynchronises every
+/// metadata entry.
 #[derive(Debug, Clone)]
 pub enum MetadataValue<'a> {
     Byte(i8),
     VarInt(VarInt),
-    VarLong(VarLong),
     Float(f32),
     String(&'a str),
     Chat(&'a str),
@@ -193,14 +197,13 @@ pub enum MetadataValue<'a> {
     OptPosition(Option<u64>),
     Direction(VarInt),
     OptUuid(Option<Uuid>),
-    BlockState(VarInt),
-    /// `0` means absent; air is not representable.
-    OptBlockState(Option<VarInt>),
+    /// `0` means absent.
+    OptBlockId(Option<VarInt>),
+    Nbt(NbtTag<'a>),
     Particle {
         particle_id: VarInt,
         data: ParticleData<'a>,
     },
-    Particles(Vec<(VarInt, ParticleData<'a>)>),
     VillagerData {
         kind: VarInt,
         profession: VarInt,
@@ -217,52 +220,46 @@ impl<'a> MetadataValue<'a> {
         Ok(match kind {
             0 => Self::Byte(decoder.i8()?),
             1 => Self::VarInt(decoder.varint()?),
-            2 => Self::VarLong(decoder.varlong()?),
-            3 => Self::Float(decoder.f32()?),
-            4 => Self::String(decoder.string()?),
-            5 => Self::Chat(decoder.string()?),
-            6 => Self::OptChat(optional_chat(decoder)?),
-            7 => Self::Slot(Slot::decode(decoder)?),
-            8 => Self::Boolean(decoder.bool()?),
-            9 => Self::Rotation([decoder.f32()?, decoder.f32()?, decoder.f32()?]),
-            10 => Self::Position(decoder.u64()?),
-            11 => Self::OptPosition(if decoder.bool()? {
+            2 => Self::Float(decoder.f32()?),
+            3 => Self::String(decoder.string()?),
+            4 => Self::Chat(decoder.string()?),
+            5 => Self::OptChat(optional_chat(decoder)?),
+            6 => Self::Slot(Slot::decode(decoder)?),
+            7 => Self::Boolean(decoder.bool()?),
+            8 => Self::Rotation([decoder.f32()?, decoder.f32()?, decoder.f32()?]),
+            9 => Self::Position(decoder.u64()?),
+            10 => Self::OptPosition(if decoder.bool()? {
                 Some(decoder.u64()?)
             } else {
                 None
             }),
-            12 => Self::Direction(decoder.varint()?),
-            13 => Self::OptUuid(if decoder.bool()? {
+            11 => Self::Direction(decoder.varint()?),
+            12 => Self::OptUuid(if decoder.bool()? {
                 Some(decoder.uuid()?)
             } else {
                 None
             }),
-            14 => Self::BlockState(decoder.varint()?),
-            15 => Self::OptBlockState(if decoder.varint()?.get() == 0 {
-                None
-            } else {
-                Some(decoder.varint()?)
-            }),
-            16 => {
+            13 => {
+                // Read once: the value doubles as the presence marker.
+                let id = decoder.varint()?;
+                Self::OptBlockId((id.get() != 0).then_some(id))
+            }
+            14 => Self::Nbt(decoder.nbt()?),
+            15 => {
                 let particle_id = decoder.varint()?;
                 let data = particle_data(decoder, particle_id.get())?;
                 Self::Particle { particle_id, data }
             }
-            17 => Self::Particles(counted(decoder, |d| {
-                let particle_id = d.varint()?;
-                let data = particle_data(d, particle_id.get())?;
-                Ok((particle_id, data))
-            })?),
-            18 => Self::VillagerData {
+            16 => Self::VillagerData {
                 kind: decoder.varint()?,
                 profession: decoder.varint()?,
                 level: decoder.varint()?,
             },
-            19 => Self::OptVarInt(match decoder.varint()?.get() {
+            17 => Self::OptVarInt(match decoder.varint()?.get() {
                 0 => None,
                 n => Some(VarInt::new(n - 1)),
             }),
-            20 => Self::Pose(decoder.varint()?),
+            18 => Self::Pose(decoder.varint()?),
             other => return Err(Error::UnknownOpcode(other)),
         })
     }

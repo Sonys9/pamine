@@ -283,6 +283,8 @@ fn parser_properties<'a>(
         44..=48 => CommandParser::Resource {
             registry: decoder.string()?,
         },
+        // Every other 1.19.2 parser (7-30, 32-42, 49-56) has no properties.
+        7..=56 => CommandParser::None,
         other => return Err(Error::UnknownOpcode(other)),
     })
 }

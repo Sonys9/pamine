@@ -16,7 +16,11 @@ use tokio::{
 };
 use tracing::{error, info};
 
-use crate::packets::{Parser, Side};
+use crate::packets::{
+    Packet::C2S,
+    Parser, Side,
+    c2s::{self, packets::C2SPacket, play::ChatMessage},
+};
 
 pub const UNAVAILABLE_ERR: i32 = 115;
 
@@ -111,7 +115,13 @@ impl Connector {
                         // wait for the next read instead of logging an error.
                         Ok(None) => break,
                         Ok(Some(packet)) => {
-                            info!("[{:?}] parsed packet: {:?}", side, packet);
+                            // let str_packet = format!("{:?}", packet);
+                            // info!("[{:?}] parsed packet: {}", side, str_packet.chars().take(200).collect::<String>());
+                            if let C2S(C2SPacket::Play(c2s::play::Play::ChatMessage(message))) =
+                                packet
+                            {
+                                info!("Just heard a message: {}!", message.message);
+                            };
                             parser.clear(side);
                         }
                         Err(e) => {
