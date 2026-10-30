@@ -132,7 +132,11 @@ impl<'a> Decode<'a> for Login<'a> {
     }
 }
 
-#[derive(Decode, Debug, Clone)]
+/// `Respawn` (0x3E).
+///
+/// Hand-written `Decode`: the death location pair is gated by
+/// `has_death_location`, not by a per-field boolean.
+#[derive(Debug, Clone)]
 pub struct Respawn<'a> {
     pub dimension_type: &'a str,
     pub dimension_name: &'a str,
@@ -145,6 +149,38 @@ pub struct Respawn<'a> {
     pub has_death_location: bool,
     pub death_dimension_name: Option<&'a str>,
     pub death_location: Option<u64>,
+}
+
+impl<'a> Decode<'a> for Respawn<'a> {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        let dimension_type = decoder.string()?;
+        let dimension_name = decoder.string()?;
+        let hashed_seed = decoder.i64()?;
+        let gamemode = decoder.u8()?;
+        let previous_gamemode = decoder.i8()?;
+        let is_debug = decoder.bool()?;
+        let is_flat = decoder.bool()?;
+        let copy_metadata = decoder.bool()?;
+        let has_death_location = decoder.bool()?;
+        let (death_dimension_name, death_location) = if has_death_location {
+            (Some(decoder.string()?), Some(decoder.u64()?))
+        } else {
+            (None, None)
+        };
+        Ok(Self {
+            dimension_type,
+            dimension_name,
+            hashed_seed,
+            gamemode,
+            previous_gamemode,
+            is_debug,
+            is_flat,
+            copy_metadata,
+            has_death_location,
+            death_dimension_name,
+            death_location,
+        })
+    }
 }
 
 #[derive(Decode, Debug, Clone)]
@@ -217,13 +253,15 @@ pub struct CombatDeath<'a> {
     pub message: &'a str,
 }
 
-/// Bit flags of the `Player Info` action mask.
-pub const PLAYER_INFO_ADD_PLAYER: u8 = 0x01;
-pub const PLAYER_INFO_INITIALIZE_CHAT: u8 = 0x02;
-pub const PLAYER_INFO_UPDATE_GAME_MODE: u8 = 0x04;
-pub const PLAYER_INFO_UPDATE_LISTED: u8 = 0x08;
-pub const PLAYER_INFO_UPDATE_LATENCY: u8 = 0x10;
-pub const PLAYER_INFO_UPDATE_DISPLAY_NAME: u8 = 0x20;
+/// `Player Info` action, protocol 760.
+///
+/// In 1.19.2 this is a single enum, not a bitmask: the action selects exactly
+/// one body layout for every entry in the array.
+pub const PLAYER_INFO_ADD_PLAYER: i32 = 0;
+pub const PLAYER_INFO_UPDATE_GAME_MODE: i32 = 1;
+pub const PLAYER_INFO_UPDATE_LATENCY: i32 = 2;
+pub const PLAYER_INFO_UPDATE_DISPLAY_NAME: i32 = 3;
+pub const PLAYER_INFO_REMOVE_PLAYER: i32 = 4;
 
 /// A signed skin/cape property.
 #[derive(Debug, Clone)]
@@ -233,84 +271,85 @@ pub struct PlayerProperty<'a> {
     pub signature: Option<&'a str>,
 }
 
-/// One player entry of `Player Info`. Every field past `uuid` is gated by the
-/// packet's `actions` bitmask, so absent fields stay `None`.
+/// The chat-initialisation block of an `add player` entry.
+///
+/// It is opaque key material this proxy never inspects, but it still has to be
+/// consumed to keep the cursor in sync.
+#[derive(Debug, Clone)]
+pub struct PlayerSignatureData<'a> {
+    pub timestamp: i64,
+    pub public_key: &'a [u8],
+    pub signature: &'a [u8],
+}
+
+/// One player entry of `Player Info`. Which fields are populated depends on the
+/// packet's `action`, so absent fields stay `None`.
 #[derive(Debug, Clone)]
 pub struct PlayerInfoEntry<'a> {
     pub uuid: Uuid,
     pub name: Option<&'a str>,
     pub properties: Option<Vec<PlayerProperty<'a>>>,
     pub game_mode: Option<VarInt>,
-    pub listed: Option<bool>,
     pub latency: Option<VarInt>,
     pub display_name: Option<Option<&'a str>>,
+    pub signature_data: Option<PlayerSignatureData<'a>>,
 }
 
+/// `Player Info` (0x37).
 #[derive(Debug, Clone)]
 pub struct PlayerInfo<'a> {
-    pub actions: u8,
+    pub action: VarInt,
     pub players: Vec<PlayerInfoEntry<'a>>,
 }
 
 impl<'a> Decode<'a> for PlayerInfo<'a> {
     fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
-        let actions = decoder.u8()?;
+        let action = decoder.varint()?;
+        let action_id = action.get();
+
         let players = counted(decoder, |d| {
             let uuid = d.uuid()?;
-
-            let (name, properties) = if actions & PLAYER_INFO_ADD_PLAYER != 0 {
-                let name = d.string()?;
-                let properties = counted(d, |d| {
-                    Ok(PlayerProperty {
-                        name: d.string()?,
-                        value: d.string()?,
-                        signature: if d.bool()? { Some(d.string()?) } else { None },
-                    })
-                })?;
-                (Some(name), Some(properties))
-            } else {
-                (None, None)
+            let mut entry = PlayerInfoEntry {
+                uuid,
+                name: None,
+                properties: None,
+                game_mode: None,
+                latency: None,
+                display_name: None,
+                signature_data: None,
             };
 
-            // The chat-initialisation block (session id + key signature) is
-            // skipped: it is opaque key material this proxy never inspects.
-            if actions & PLAYER_INFO_INITIALIZE_CHAT != 0 {
-                let _has_signature = d.bool()?;
-                let _session_id = d.uuid()?;
-                let _key_signature = d.slice()?;
+            match action_id {
+                PLAYER_INFO_ADD_PLAYER => {
+                    entry.name = Some(d.string()?);
+                    entry.properties = Some(counted(d, |d| {
+                        Ok(PlayerProperty {
+                            name: d.string()?,
+                            value: d.string()?,
+                            signature: if d.bool()? { Some(d.string()?) } else { None },
+                        })
+                    })?);
+                    entry.game_mode = Some(d.varint()?);
+                    entry.latency = Some(d.varint()?);
+                    entry.display_name = Some(optional_chat(d)?);
+                    // `has sig data` gates the key material.
+                    if d.bool()? {
+                        entry.signature_data = Some(PlayerSignatureData {
+                            timestamp: d.i64()?,
+                            public_key: d.slice()?,
+                            signature: d.slice()?,
+                        });
+                    }
+                }
+                PLAYER_INFO_UPDATE_GAME_MODE => entry.game_mode = Some(d.varint()?),
+                PLAYER_INFO_UPDATE_LATENCY => entry.latency = Some(d.varint()?),
+                PLAYER_INFO_UPDATE_DISPLAY_NAME => entry.display_name = Some(optional_chat(d)?),
+                PLAYER_INFO_REMOVE_PLAYER => {}
+                other => return Err(Error::UnknownOpcode(other)),
             }
 
-            let game_mode = if actions & PLAYER_INFO_UPDATE_GAME_MODE != 0 {
-                Some(d.varint()?)
-            } else {
-                None
-            };
-            let listed = if actions & PLAYER_INFO_UPDATE_LISTED != 0 {
-                Some(d.bool()?)
-            } else {
-                None
-            };
-            let latency = if actions & PLAYER_INFO_UPDATE_LATENCY != 0 {
-                Some(d.varint()?)
-            } else {
-                None
-            };
-            let display_name = if actions & PLAYER_INFO_UPDATE_DISPLAY_NAME != 0 {
-                Some(optional_chat(d)?)
-            } else {
-                None
-            };
-
-            Ok(PlayerInfoEntry {
-                uuid,
-                name,
-                properties,
-                game_mode,
-                listed,
-                latency,
-                display_name,
-            })
+            Ok(entry)
         })?;
-        Ok(Self { actions, players })
+        Ok(Self { action, players })
     }
 }

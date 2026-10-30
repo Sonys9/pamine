@@ -124,8 +124,7 @@ impl<'a> Decoder<'a> {
 
     /// NBT strings are `u16` big-endian length + UTF-8 bytes, not VarInt-prefixed.
     fn nbt_string(&mut self) -> Result<&'a str, Error> {
-        let len = self.u16()? as usize;
-        str::from_utf8(self.read_len(len)?).map_err(|_| Error::Utf8)
+        self.string_u16()
     }
 }
 

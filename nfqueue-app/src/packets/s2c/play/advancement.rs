@@ -16,7 +16,11 @@ pub struct AdvancementProgress<'a> {
     pub parent_id: Option<&'a str>,
     /// `None` when the advancement has no display data.
     pub display: Option<AdvancementDisplay<'a>>,
+    /// Criterion identifiers. Each carries no payload on the wire.
     pub criteria: Vec<&'a str>,
+    /// Requirement groups: every inner list is a set of criteria that must all
+    /// be met, and the outer list is satisfied when any group is.
+    pub requirements: Vec<Vec<&'a str>>,
 }
 
 /// The display block of an advancement.
@@ -25,7 +29,9 @@ pub struct AdvancementDisplay<'a> {
     pub title: &'a str,
     pub description: &'a str,
     pub icon: Slot<'a>,
+    /// 0 = task, 1 = challenge, 2 = goal.
     pub frame_type: VarInt,
+    /// 0x01: has background texture, 0x02: show toast, 0x04: hidden.
     pub flags: i32,
     /// Only present when the `0x01` flag (has background) is set.
     pub background_texture: Option<&'a str>,
@@ -33,25 +39,32 @@ pub struct AdvancementDisplay<'a> {
     pub y_coord: f32,
 }
 
-/// One advancement that was removed or whose progress changed.
+/// One criterion of an advancement and whether it has been achieved.
 #[derive(Debug, Clone)]
-pub struct AdvancementRemoval<'a> {
+pub struct CriterionProgress<'a> {
     pub id: &'a str,
+    /// `None` when the criterion has not been achieved.
+    pub achieved_at: Option<i64>,
 }
 
+/// A progress-only update: the advancement id plus its criteria states.
+#[derive(Debug, Clone)]
+pub struct AdvancementProgressUpdate<'a> {
+    pub id: &'a str,
+    pub criteria: Vec<CriterionProgress<'a>>,
+}
+
+/// `Update Advancements` (0x67).
+///
+/// Hand-written `Decode`: the advancement body is a chain of gated sections
+/// (parent, display, criteria, requirements) and the progress entries carry a
+/// per-criterion `achieved` gate.
 #[derive(Debug, Clone)]
 pub struct UpdateAdvancements<'a> {
     pub reset: bool,
     pub added: Vec<AdvancementProgress<'a>>,
     pub removed: Vec<&'a str>,
     pub progress: Vec<AdvancementProgressUpdate<'a>>,
-}
-
-/// A progress-only update: the advancement id plus its completed criteria.
-#[derive(Debug, Clone)]
-pub struct AdvancementProgressUpdate<'a> {
-    pub id: &'a str,
-    pub criteria: Vec<&'a str>,
 }
 
 impl<'a> Decode<'a> for UpdateAdvancements<'a> {
@@ -88,22 +101,29 @@ impl<'a> Decode<'a> for UpdateAdvancements<'a> {
             } else {
                 None
             };
+            // Criteria are identifiers with no payload.
             let criteria = identifiers(d)?;
+            // Requirements: a count of groups, each a count of identifiers.
+            let requirements = counted(d, |d| identifiers(d))?;
             Ok(AdvancementProgress {
                 id,
                 parent_id,
                 display,
                 criteria,
+                requirements,
             })
         })?;
 
         let removed = identifiers(decoder)?;
 
         let progress = counted(decoder, |d| {
-            Ok(AdvancementProgressUpdate {
-                id: d.string()?,
-                criteria: identifiers(d)?,
-            })
+            let id = d.string()?;
+            let criteria = counted(d, |d| {
+                let id = d.string()?;
+                let achieved_at = if d.bool()? { Some(d.i64()?) } else { None };
+                Ok(CriterionProgress { id, achieved_at })
+            })?;
+            Ok(AdvancementProgressUpdate { id, criteria })
         })?;
 
         Ok(Self {
@@ -115,21 +135,93 @@ impl<'a> Decode<'a> for UpdateAdvancements<'a> {
     }
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct SelectAdvancementsTab<'a> {
     pub has_id: bool,
     pub tab_id: Option<&'a str>,
 }
 
-/// One recipe: an identifier plus an opaque, type-dependent payload.
-#[derive(Debug, Clone)]
-pub struct Recipe<'a> {
-    pub id: &'a str,
-    /// The recipe body. Its layout depends on the recipe `type`, which is a
-    /// registry entry this proxy does not model, so the bytes are kept as-is.
-    pub data: &'a [u8],
+impl<'a> Decode<'a> for SelectAdvancementsTab<'a> {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        let has_id = decoder.bool()?;
+        let tab_id = if has_id {
+            Some(decoder.string()?)
+        } else {
+            None
+        };
+        Ok(Self { has_id, tab_id })
+    }
 }
 
+/// One ingredient of a recipe: any of `items` may be used.
+#[derive(Debug, Clone)]
+pub struct Ingredient<'a> {
+    pub items: Vec<Slot<'a>>,
+}
+
+impl<'a> Decode<'a> for Ingredient<'a> {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        let items = counted(decoder, |d| Slot::decode(d))?;
+        Ok(Self { items })
+    }
+}
+
+/// The type-dependent body of a recipe.
+#[derive(Debug, Clone)]
+pub enum RecipeData<'a> {
+    /// `crafting_shapeless` — ingredients in any order.
+    Shapeless {
+        group: &'a str,
+        ingredients: Vec<Ingredient<'a>>,
+        result: Slot<'a>,
+    },
+    /// `crafting_shaped` — ingredients laid out in a `width * height` grid.
+    Shaped {
+        width: VarInt,
+        height: VarInt,
+        group: &'a str,
+        /// `width * height` entries, indexed by `x + y * width`.
+        ingredients: Vec<Ingredient<'a>>,
+        result: Slot<'a>,
+    },
+    /// `smelting`, `blasting`, `smoking`, `campfire_cooking`.
+    Cooking {
+        group: &'a str,
+        ingredient: Ingredient<'a>,
+        result: Slot<'a>,
+        experience: f32,
+        cooking_time: VarInt,
+    },
+    /// `stonecutting`.
+    Stonecutting {
+        group: &'a str,
+        ingredient: Ingredient<'a>,
+        result: Slot<'a>,
+    },
+    /// `smithing`.
+    Smithing {
+        base: Ingredient<'a>,
+        addition: Ingredient<'a>,
+        result: Slot<'a>,
+    },
+    /// Every `crafting_special_*` recipe carries no body.
+    Special,
+}
+
+/// One recipe: a type, an identifier and a type-dependent body.
+#[derive(Debug, Clone)]
+pub struct Recipe<'a> {
+    /// The recipe type identifier, e.g. `minecraft:crafting_shaped`.
+    pub kind: &'a str,
+    pub id: &'a str,
+    pub data: RecipeData<'a>,
+}
+
+/// `Update Recipes` (0x6A).
+///
+/// Hand-written `Decode`: the wire order is **type first, then id**, and the
+/// body that follows has no length prefix, so it can only be delimited by
+/// knowing the layout of every recipe type.
 #[derive(Debug, Clone)]
 pub struct UpdateRecipes<'a> {
     pub recipes: Vec<Recipe<'a>>,
@@ -138,15 +230,71 @@ pub struct UpdateRecipes<'a> {
 impl<'a> Decode<'a> for UpdateRecipes<'a> {
     fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
         let recipes = counted(decoder, |d| {
+            let kind = d.string()?;
             let id = d.string()?;
-            // The recipe type is a VarInt registry id; the body that follows
-            // has no length prefix, so it cannot be delimited without knowing
-            // every recipe type. The whole packet is therefore consumed here.
-            let _recipe_type = d.varint()?;
-            Ok(Recipe { id, data: d.rest() })
+            let data = recipe_data(d, kind)?;
+            Ok(Recipe { kind, id, data })
         })?;
         Ok(Self { recipes })
     }
+}
+
+/// Reads the body of the recipe whose type identifier is `kind`.
+///
+/// The identifier is namespaced (`minecraft:smelting`), so only the part after
+/// the last `:` is matched. An unknown type is an error: its body has no length
+/// prefix, so guessing would desynchronise the rest of the packet.
+fn recipe_data<'a>(decoder: &mut Decoder<'a>, kind: &str) -> Result<RecipeData<'a>, Error> {
+    let name = kind.rsplit(':').next().unwrap_or(kind);
+
+    Ok(match name {
+        "crafting_shapeless" => RecipeData::Shapeless {
+            group: decoder.string()?,
+            ingredients: counted(decoder, |d| Ingredient::decode(d))?,
+            result: Slot::decode(decoder)?,
+        },
+        "crafting_shaped" => {
+            let width = decoder.varint()?;
+            let height = decoder.varint()?;
+            let group = decoder.string()?;
+            // The grid is `width * height` entries, not a counted array.
+            let cells = width.get().max(0) as usize * height.get().max(0) as usize;
+            if cells > pcore::decoder::MAX_ELEMENTS {
+                return Err(Error::LenLimit(cells));
+            }
+            let mut ingredients = Vec::with_capacity(cells);
+            for _ in 0..cells {
+                ingredients.push(Ingredient::decode(decoder)?);
+            }
+            RecipeData::Shaped {
+                width,
+                height,
+                group,
+                ingredients,
+                result: Slot::decode(decoder)?,
+            }
+        }
+        "smelting" | "blasting" | "smoking" | "campfire_cooking" => RecipeData::Cooking {
+            group: decoder.string()?,
+            ingredient: Ingredient::decode(decoder)?,
+            result: Slot::decode(decoder)?,
+            experience: decoder.f32()?,
+            cooking_time: decoder.varint()?,
+        },
+        "stonecutting" => RecipeData::Stonecutting {
+            group: decoder.string()?,
+            ingredient: Ingredient::decode(decoder)?,
+            result: Slot::decode(decoder)?,
+        },
+        "smithing" => RecipeData::Smithing {
+            base: Ingredient::decode(decoder)?,
+            addition: Ingredient::decode(decoder)?,
+            result: Slot::decode(decoder)?,
+        },
+        // Every `crafting_special_*` recipe has an empty body.
+        _ if name.starts_with("crafting_special_") => RecipeData::Special,
+        _ => return Err(Error::Nbt("unknown recipe type")),
+    })
 }
 
 /// One named tag group: an identifier and the entries it contains.

@@ -1,6 +1,9 @@
 //! Block interaction and block-entity editing.
 
-use pcore::{Decode, decoder::VarInt};
+use pcore::{
+    Decode,
+    decoder::{VarInt, VarLong},
+};
 
 #[derive(Decode, Debug, Clone)]
 pub struct QueryBlockEntityTag {
@@ -91,6 +94,7 @@ pub struct ProgramStructureBlock<'a> {
     pub rotation: VarInt,
     pub metadata: &'a str,
     pub integrity: f32,
-    pub seed: i64,
+    /// VarLong on the wire, not a fixed-width `i64`.
+    pub seed: VarLong,
     pub flags: u8,
 }

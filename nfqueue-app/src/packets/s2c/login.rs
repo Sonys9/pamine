@@ -2,7 +2,8 @@
 
 use pcore::{
     Decode,
-    decoder::{Uuid, VarInt},
+    decoder::{Decoder, MAX_ELEMENTS, Uuid, VarInt},
+    errors::Error,
 };
 use pcore_gen::DecodePacket;
 
@@ -32,11 +33,83 @@ pub struct EncryptionRequest<'a> {
     pub verify_token: &'a [u8],
 }
 
-#[derive(Decode, Debug, Clone)]
+/// One signed skin/cape property of a player profile.
+///
+/// `signature` uses the NBT string framing (`u16` length), not the VarInt one:
+/// the wiki types it as `Optional String (32767)` inside an `Array of String`,
+/// and that array is written with `writeString`, i.e. `u16`-prefixed.
+#[derive(Debug, Clone)]
+pub struct Property<'a> {
+    pub name: &'a str,
+    pub value: &'a str,
+    pub signature: Option<&'a str>,
+}
+
+impl<'a> Decode<'a> for Property<'a> {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        let name = decoder.string_u16()?;
+        let value = decoder.string_u16()?;
+        // A zero-length signature means "not signed".
+        let signature = if decoder.u8()? == 0 {
+            None
+        } else {
+            Some(decoder.string_u16()?)
+        };
+        Ok(Self {
+            name,
+            value,
+            signature,
+        })
+    }
+}
+
+/// The `Property` array of `Login Success`.
+///
+/// Kept as its own type so the count and the elements are read in one place,
+/// with the same `MAX_ELEMENTS` guard the other counted arrays use.
+#[derive(Debug, Clone)]
+pub struct Properties<'a> {
+    pub entries: Vec<Property<'a>>,
+}
+
+impl<'a> Decode<'a> for Properties<'a> {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        let len = decoder.varint()?.get();
+        if len < 0 {
+            return Err(Error::Read(0));
+        }
+        let len = len as usize;
+        // Reject a hostile count before allocating: the length arrives from the
+        // wire, so it can claim millions of entries that are not there.
+        if len > MAX_ELEMENTS {
+            return Err(Error::LenLimit(len));
+        }
+        let mut entries = Vec::with_capacity(len);
+        for _ in 0..len {
+            entries.push(Property::decode(decoder)?);
+        }
+        Ok(Self { entries })
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct LoginSuccess<'a> {
     pub uuid: Uuid,
     pub username: &'a str,
-    pub number_of_properties: VarInt,
+    pub properties: Properties<'a>,
+}
+
+impl<'a> Decode<'a> for LoginSuccess<'a> {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        let uuid = decoder.uuid()?;
+        let username = decoder.string()?;
+        let properties = Properties::decode(decoder)?;
+        Ok(Self {
+            uuid,
+            username,
+            properties,
+        })
+    }
 }
 
 #[derive(Decode, Debug, Clone)]
@@ -44,9 +117,14 @@ pub struct SetCompression {
     pub threshold: VarInt,
 }
 
+/// `Login Plugin Request` (0x04).
+///
+/// The payload has no length prefix: the wiki states its length "must be
+/// inferred from the packet length", so it is read as the rest of the buffer.
 #[derive(Decode, Debug, Clone)]
 pub struct LoginPluginRequest<'a> {
     pub message_id: VarInt,
     pub channel: &'a str,
+    #[decode(rest)]
     pub data: &'a [u8],
 }

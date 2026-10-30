@@ -105,7 +105,8 @@ pub struct SetHeldItem {
 pub struct TradeOffer<'a> {
     pub input_item_1: Slot<'a>,
     pub output_item: Slot<'a>,
-    pub input_item_2: Slot<'a>,
+    /// Only present when the trade's `has_second_item` flag is set.
+    pub input_item_2: Option<Slot<'a>>,
     pub trade_disabled: bool,
     pub number_of_trade_uses: i32,
     pub maximum_number_of_trade_uses: i32,
@@ -115,20 +116,40 @@ pub struct TradeOffer<'a> {
     pub demand: i32,
 }
 
+/// `Merchant Offers` (0x27).
+///
+/// Hand-written `Decode`: the second input slot is gated by a boolean, and the
+/// packet ends with four villager-level fields that belong to the window rather
+/// than to a single trade.
 #[derive(Debug, Clone)]
 pub struct MerchantOffers<'a> {
     pub window_id: VarInt,
     pub trades: Vec<TradeOffer<'a>>,
+    /// 1: Novice, 2: Apprentice, 3: Journeyman, 4: Expert, 5: Master.
+    pub villager_level: VarInt,
+    /// Total experience of the villager; always 0 for the wandering trader.
+    pub experience: VarInt,
+    /// False for the wandering trader.
+    pub is_regular_villager: bool,
+    /// True for regular villagers, false for the wandering trader.
+    pub can_restock: bool,
 }
 
 impl<'a> Decode<'a> for MerchantOffers<'a> {
     fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
         let window_id = decoder.varint()?;
         let trades = counted(decoder, |d| {
+            let input_item_1 = Slot::decode(d)?;
+            let output_item = Slot::decode(d)?;
+            let input_item_2 = if d.bool()? {
+                Some(Slot::decode(d)?)
+            } else {
+                None
+            };
             Ok(TradeOffer {
-                input_item_1: Slot::decode(d)?,
-                output_item: Slot::decode(d)?,
-                input_item_2: Slot::decode(d)?,
+                input_item_1,
+                output_item,
+                input_item_2,
                 trade_disabled: d.bool()?,
                 number_of_trade_uses: d.i32()?,
                 maximum_number_of_trade_uses: d.i32()?,
@@ -138,7 +159,18 @@ impl<'a> Decode<'a> for MerchantOffers<'a> {
                 demand: d.i32()?,
             })
         })?;
-        Ok(Self { window_id, trades })
+        let villager_level = decoder.varint()?;
+        let experience = decoder.varint()?;
+        let is_regular_villager = decoder.bool()?;
+        let can_restock = decoder.bool()?;
+        Ok(Self {
+            window_id,
+            trades,
+            villager_level,
+            experience,
+            is_regular_villager,
+            can_restock,
+        })
     }
 }
 

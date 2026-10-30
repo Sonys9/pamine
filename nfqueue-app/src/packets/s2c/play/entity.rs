@@ -2,10 +2,11 @@
 
 use pcore::{
     Decode,
-    decoder::{Decoder, NbtTag, Slot, Uuid, VarInt},
+    decoder::{Decoder, NbtTag, Slot, Uuid, VarInt, VarLong},
     errors::Error,
 };
 
+use super::particle::{ParticleData, particle_data};
 use crate::packets::{counted, optional_chat};
 
 #[derive(Decode, Debug, Clone)]
@@ -94,15 +95,45 @@ pub struct MoveVehicle {
     pub pitch: f32,
 }
 
-#[derive(Decode, Debug, Clone)]
+/// `Look At` (0x38).
+///
+/// Hand-written `Decode`: `entity_id` and `entity_feet_eyes` are gated by
+/// `is_entity`, not by their own booleans.
+#[derive(Debug, Clone)]
 pub struct LookAt {
+    /// 0 = feet, 1 = eyes.
     pub feet_eyes: VarInt,
     pub target_x: f64,
     pub target_y: f64,
     pub target_z: f64,
     pub is_entity: bool,
     pub entity_id: Option<VarInt>,
+    /// 0 = feet, 1 = eyes; same meaning as `feet_eyes`, for the target entity.
     pub entity_feet_eyes: Option<VarInt>,
+}
+
+impl<'a> Decode<'a> for LookAt {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        let feet_eyes = decoder.varint()?;
+        let target_x = decoder.f64()?;
+        let target_y = decoder.f64()?;
+        let target_z = decoder.f64()?;
+        let is_entity = decoder.bool()?;
+        let (entity_id, entity_feet_eyes) = if is_entity {
+            (Some(decoder.varint()?), Some(decoder.varint()?))
+        } else {
+            (None, None)
+        };
+        Ok(Self {
+            feet_eyes,
+            target_x,
+            target_y,
+            target_z,
+            is_entity,
+            entity_id,
+            entity_feet_eyes,
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -134,8 +165,11 @@ pub struct SetCamera {
     pub camera_id: VarInt,
 }
 
-/// One metadata entry. The value type is chosen by the entry's index, so the
-/// payload is kept as a typed enum rather than raw bytes.
+/// One metadata entry.
+///
+/// The wire format is `index: u8, type: VarInt, value: <type>`. The index only
+/// says *which* property this is; the type says how to read the value, so the
+/// two must not be confused.
 #[derive(Debug, Clone)]
 pub struct MetadataEntry<'a> {
     pub index: u8,
@@ -147,6 +181,7 @@ pub struct MetadataEntry<'a> {
 pub enum MetadataValue<'a> {
     Byte(i8),
     VarInt(VarInt),
+    VarLong(VarLong),
     Float(f32),
     String(&'a str),
     Chat(&'a str),
@@ -158,69 +193,85 @@ pub enum MetadataValue<'a> {
     OptPosition(Option<u64>),
     Direction(VarInt),
     OptUuid(Option<Uuid>),
-    OptBlockId(Option<VarInt>),
-    Nbt(NbtTag<'a>),
-    Particle,
+    BlockState(VarInt),
+    /// `0` means absent; air is not representable.
+    OptBlockState(Option<VarInt>),
+    Particle {
+        particle_id: VarInt,
+        data: ParticleData<'a>,
+    },
+    Particles(Vec<(VarInt, ParticleData<'a>)>),
     VillagerData {
         kind: VarInt,
         profession: VarInt,
         level: VarInt,
     },
+    /// `0` means absent, otherwise the value is `1 + actual`.
     OptVarInt(Option<VarInt>),
     Pose(VarInt),
 }
 
 impl<'a> MetadataValue<'a> {
-    /// Reads the value for metadata index `index`.
-    fn read(decoder: &mut Decoder<'a>, index: u8) -> Result<Self, Error> {
-        Ok(match index {
+    /// Reads the value whose type id has already been consumed.
+    fn read(decoder: &mut Decoder<'a>, kind: i32) -> Result<Self, Error> {
+        Ok(match kind {
             0 => Self::Byte(decoder.i8()?),
             1 => Self::VarInt(decoder.varint()?),
-            2 => Self::Float(decoder.f32()?),
-            3 => Self::String(decoder.string()?),
-            4 => Self::Chat(decoder.string()?),
-            5 => Self::OptChat(optional_chat(decoder)?),
-            6 => Self::Slot(Slot::decode(decoder)?),
-            7 => Self::Boolean(decoder.bool()?),
-            8 => Self::Rotation([decoder.f32()?, decoder.f32()?, decoder.f32()?]),
-            9 => Self::Position(decoder.u64()?),
-            10 => Self::OptPosition(if decoder.bool()? {
+            2 => Self::VarLong(decoder.varlong()?),
+            3 => Self::Float(decoder.f32()?),
+            4 => Self::String(decoder.string()?),
+            5 => Self::Chat(decoder.string()?),
+            6 => Self::OptChat(optional_chat(decoder)?),
+            7 => Self::Slot(Slot::decode(decoder)?),
+            8 => Self::Boolean(decoder.bool()?),
+            9 => Self::Rotation([decoder.f32()?, decoder.f32()?, decoder.f32()?]),
+            10 => Self::Position(decoder.u64()?),
+            11 => Self::OptPosition(if decoder.bool()? {
                 Some(decoder.u64()?)
             } else {
                 None
             }),
-            11 => Self::Direction(decoder.varint()?),
-            12 => Self::OptUuid(if decoder.bool()? {
+            12 => Self::Direction(decoder.varint()?),
+            13 => Self::OptUuid(if decoder.bool()? {
                 Some(decoder.uuid()?)
             } else {
                 None
             }),
-            13 => Self::OptBlockId(if decoder.varint()?.get() == 0 {
+            14 => Self::BlockState(decoder.varint()?),
+            15 => Self::OptBlockState(if decoder.varint()?.get() == 0 {
                 None
             } else {
                 Some(decoder.varint()?)
             }),
-            14 => Self::Nbt(decoder.nbt()?),
-            // Index 15 is a particle: its layout depends on the particle id,
-            // which this proxy does not model, so it is rejected rather than
-            // silently mis-parsed.
-            15 => return Err(Error::Nbt("particle metadata is not supported")),
-            16 => Self::VillagerData {
+            16 => {
+                let particle_id = decoder.varint()?;
+                let data = particle_data(decoder, particle_id.get())?;
+                Self::Particle { particle_id, data }
+            }
+            17 => Self::Particles(counted(decoder, |d| {
+                let particle_id = d.varint()?;
+                let data = particle_data(d, particle_id.get())?;
+                Ok((particle_id, data))
+            })?),
+            18 => Self::VillagerData {
                 kind: decoder.varint()?,
                 profession: decoder.varint()?,
                 level: decoder.varint()?,
             },
-            17 => Self::OptVarInt(if decoder.bool()? {
-                Some(decoder.varint()?)
-            } else {
-                None
+            19 => Self::OptVarInt(match decoder.varint()?.get() {
+                0 => None,
+                n => Some(VarInt::new(n - 1)),
             }),
-            18 => Self::Pose(decoder.varint()?),
-            other => return Err(Error::UnknownOpcode(other as i32)),
+            20 => Self::Pose(decoder.varint()?),
+            other => return Err(Error::UnknownOpcode(other)),
         })
     }
 }
 
+/// `Set Entity Metadata` (0x50).
+///
+/// Hand-written `Decode`: entries are `index, type, value` triples terminated
+/// by a `0xFF` index byte, and the value layout comes from the type.
 #[derive(Debug, Clone)]
 pub struct SetEntityMetadata<'a> {
     pub entity_id: VarInt,
@@ -237,7 +288,8 @@ impl<'a> Decode<'a> for SetEntityMetadata<'a> {
             if index == 0xFF {
                 break;
             }
-            let value = MetadataValue::read(decoder, index)?;
+            let kind = decoder.varint()?.get();
+            let value = MetadataValue::read(decoder, kind)?;
             metadata.push(MetadataEntry { index, value });
         }
         Ok(Self {
@@ -276,15 +328,25 @@ pub struct SetEquipment<'a> {
 
 impl<'a> Decode<'a> for SetEquipment<'a> {
     fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        const CONTINUED: u8 = 0x80;
+        /// Equipment slots are 0-5; anything else is a malformed packet.
+        const MAX_SLOT: u8 = 5;
+
         let entity_id = decoder.varint()?;
         let mut equipment = Vec::new();
         // The high bit of the slot byte means "another entry follows".
         loop {
-            let raw = decoder.i8()?;
-            let slot = raw & 0x7F;
+            let raw = decoder.u8()?;
+            let slot = raw & !CONTINUED;
+            if slot > MAX_SLOT {
+                return Err(Error::UnknownOpcode(slot as i32));
+            }
             let item = Slot::decode(decoder)?;
-            equipment.push(EquipmentEntry { slot, item });
-            if raw & 0x80u8 as i8 == 0 {
+            equipment.push(EquipmentEntry {
+                slot: slot as i8,
+                item,
+            });
+            if raw & CONTINUED == 0 {
                 break;
             }
         }
@@ -378,6 +440,10 @@ impl<'a> Decode<'a> for UpdateAttributes<'a> {
     }
 }
 
+/// `Entity Effect` (0x69).
+///
+/// `factor_data` is gated by a boolean on the wire; `Option<NbtTag>` reads that
+/// boolean itself, so there is no separate `has_factor_data` field.
 #[derive(Decode, Debug, Clone)]
 pub struct EntityEffect<'a> {
     pub entity_id: VarInt,
@@ -385,6 +451,5 @@ pub struct EntityEffect<'a> {
     pub amplifier: i8,
     pub duration: VarInt,
     pub flags: u8,
-    pub has_factor_data: bool,
     pub factor_data: Option<NbtTag<'a>>,
 }

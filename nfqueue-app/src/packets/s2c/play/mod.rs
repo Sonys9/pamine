@@ -12,6 +12,7 @@ pub mod command;
 pub mod entity;
 pub mod inventory;
 pub mod misc;
+pub mod particle;
 pub mod player;
 pub mod scoreboard;
 pub mod sound;

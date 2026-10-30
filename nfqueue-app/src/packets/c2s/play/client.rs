@@ -71,6 +71,9 @@ pub struct LockDifficulty {
 #[derive(Decode, Debug, Clone)]
 pub struct PluginMessage<'a> {
     pub channel: &'a str,
+    /// The payload has no length prefix: its length is whatever remains in the
+    /// packet, so it must be read as the rest of the buffer.
+    #[decode(rest)]
     pub data: &'a [u8],
 }
 

@@ -6,6 +6,7 @@ use pcore::{
     errors::Error,
 };
 
+use super::particle::{ParticleData, particle_data};
 use crate::packets::{counted, optional_chat};
 
 #[derive(Decode, Debug, Clone)]
@@ -112,7 +113,12 @@ impl<'a> Decode<'a> for Explosion {
     }
 }
 
-#[derive(Decode, Debug, Clone)]
+/// `Particle` (0x23).
+///
+/// Hand-written `Decode`: the trailing `Data` field is a union keyed by
+/// `particle_id`, so it is read through [`particle_data`] rather than left as
+/// raw bytes.
+#[derive(Debug, Clone)]
 pub struct Particle<'a> {
     pub particle_id: VarInt,
     pub long_distance: bool,
@@ -124,26 +130,74 @@ pub struct Particle<'a> {
     pub offset_z: f32,
     pub max_speed: f32,
     pub particle_count: i32,
-    pub data: &'a [u8],
+    pub data: ParticleData<'a>,
+}
+
+impl<'a> Decode<'a> for Particle<'a> {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        let particle_id = decoder.varint()?;
+        let long_distance = decoder.bool()?;
+        let x = decoder.f64()?;
+        let y = decoder.f64()?;
+        let z = decoder.f64()?;
+        let offset_x = decoder.f32()?;
+        let offset_y = decoder.f32()?;
+        let offset_z = decoder.f32()?;
+        let max_speed = decoder.f32()?;
+        let particle_count = decoder.i32()?;
+        let data = particle_data(decoder, particle_id.get())?;
+        Ok(Self {
+            particle_id,
+            long_distance,
+            x,
+            y,
+            z,
+            offset_x,
+            offset_y,
+            offset_z,
+            max_speed,
+            particle_count,
+            data,
+        })
+    }
 }
 
 /// One marker drawn on a map.
 #[derive(Debug, Clone)]
 pub struct MapIcon<'a> {
-    /// `type << 4 | direction`, packed into a single byte.
-    pub kind_and_direction: u8,
+    /// Icon type, see the map icon table.
+    pub kind: VarInt,
+    /// Map coordinate: -128 is furthest left, +127 furthest right.
     pub x: i8,
+    /// Map coordinate: -128 is highest, +127 lowest.
     pub z: i8,
+    /// 0-15; 0 is a vertical icon and each step is 22.5°.
+    pub direction: i8,
     /// A `bool`-gated display name.
     pub display_name: Option<&'a str>,
 }
 
+/// `Map Data` (0x26).
+///
+/// Hand-written `Decode`: the icon array is gated by `tracking_position`, and
+/// the pixel block is gated by `columns > 0`.
 #[derive(Debug, Clone)]
 pub struct MapData<'a> {
     pub map_id: VarInt,
     pub scale: i8,
     pub locked: bool,
+    pub tracking_position: bool,
+    /// Only present when `tracking_position` is set.
     pub icons: Vec<MapIcon<'a>>,
+    pub columns: u8,
+    /// Only present when `columns > 0`.
+    pub rows: Option<u8>,
+    /// Only present when `columns > 0`.
+    pub x: Option<i8>,
+    /// Only present when `columns > 0`.
+    pub z: Option<i8>,
+    /// Only present when `columns > 0`.
+    pub data: Option<&'a [u8]>,
 }
 
 impl<'a> Decode<'a> for MapData<'a> {
@@ -151,21 +205,45 @@ impl<'a> Decode<'a> for MapData<'a> {
         let map_id = decoder.varint()?;
         let scale = decoder.i8()?;
         let locked = decoder.bool()?;
-        // The icon array is only on the wire when tracking is enabled; the
-        // count is a VarInt and `0` covers the "not tracking" case.
-        let icons = counted(decoder, |d| {
-            Ok(MapIcon {
-                kind_and_direction: d.u8()?,
-                x: d.i8()?,
-                z: d.i8()?,
-                display_name: optional_chat(d)?,
-            })
-        })?;
+        let tracking_position = decoder.bool()?;
+
+        let icons = if tracking_position {
+            counted(decoder, |d| {
+                Ok(MapIcon {
+                    kind: d.varint()?,
+                    x: d.i8()?,
+                    z: d.i8()?,
+                    direction: d.i8()?,
+                    display_name: optional_chat(d)?,
+                })
+            })?
+        } else {
+            Vec::new()
+        };
+
+        let columns = decoder.u8()?;
+        let (rows, x, z, data) = if columns > 0 {
+            let rows = decoder.u8()?;
+            let x = decoder.i8()?;
+            let z = decoder.i8()?;
+            // The pixel array is length-prefixed by a VarInt.
+            let data = decoder.slice()?;
+            (Some(rows), Some(x), Some(z), Some(data))
+        } else {
+            (None, None, None, None)
+        };
+
         Ok(Self {
             map_id,
             scale,
             locked,
+            tracking_position,
             icons,
+            columns,
+            rows,
+            x,
+            z,
+            data,
         })
     }
 }

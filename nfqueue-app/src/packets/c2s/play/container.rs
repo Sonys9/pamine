@@ -8,8 +8,8 @@ use pcore::{
 
 #[derive(Decode, Debug, Clone)]
 pub struct ClickContainerButton {
-    pub window_id: u8,
-    pub button_id: u8,
+    pub window_id: i8,
+    pub button_id: i8,
 }
 
 #[derive(Debug, Clone)]

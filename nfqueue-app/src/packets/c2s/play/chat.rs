@@ -2,25 +2,25 @@
 
 use pcore::{
     Decode,
-    decoder::{Decoder, Uuid, VarInt},
+    decoder::{Decoder, Uuid},
     errors::Error,
 };
 
 use crate::packets::{counted, optional_bytes};
 
+/// `Message Acknowledgment` (0x03).
+///
+/// Hand-written `Decode`: the profile id and signature are gated by `has_data`.
 #[derive(Debug, Clone)]
 pub struct MessageAcknowledgment<'a> {
-    pub message_count: VarInt,
     pub has_data: bool,
-    /// Only present when `has_data` is set.
     pub profile_id: Option<Uuid>,
-    /// Only present when `has_data` is set; `None` when the length is `0`.
+    /// `None` when the length prefix is `0`.
     pub last_signature: Option<&'a [u8]>,
 }
 
 impl<'a> Decode<'a> for MessageAcknowledgment<'a> {
     fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
-        let message_count = decoder.varint()?;
         let has_data = decoder.bool()?;
         let (profile_id, last_signature) = if has_data {
             (Some(decoder.uuid()?), optional_bytes(decoder)?)
@@ -28,7 +28,6 @@ impl<'a> Decode<'a> for MessageAcknowledgment<'a> {
             (None, None)
         };
         Ok(Self {
-            message_count,
             has_data,
             profile_id,
             last_signature,
@@ -43,20 +42,10 @@ pub struct ArgumentSignature<'a> {
     pub signature: &'a [u8],
 }
 
-/// A previously seen chat message, referenced by its signature and id.
-#[derive(Debug, Clone)]
-pub struct LastSeenMessage<'a> {
-    pub signature: &'a [u8],
-    pub message_id: VarInt,
-}
-
-/// The most recently received chat message.
-#[derive(Debug, Clone)]
-pub struct LastReceived<'a> {
-    pub message_id: VarInt,
-    pub signature: &'a [u8],
-}
-
+/// `Chat Command` (0x04).
+///
+/// In 1.19.2 the packet ends after `signed_preview`; the "last seen" and
+/// "last received" arrays only exist on `Chat Message`.
 #[derive(Debug, Clone)]
 pub struct ChatCommand<'a> {
     pub command: &'a str,
@@ -64,8 +53,6 @@ pub struct ChatCommand<'a> {
     pub salt: i64,
     pub argument_signatures: Vec<ArgumentSignature<'a>>,
     pub signed_preview: bool,
-    pub last_seen_messages: Vec<LastSeenMessage<'a>>,
-    pub last_received: Option<LastReceived<'a>>,
 }
 
 impl<'a> Decode<'a> for ChatCommand<'a> {
@@ -80,32 +67,27 @@ impl<'a> Decode<'a> for ChatCommand<'a> {
             })
         })?;
         let signed_preview = decoder.bool()?;
-        let last_seen_messages = counted(decoder, |d| {
-            Ok(LastSeenMessage {
-                signature: d.slice()?,
-                message_id: d.varint()?,
-            })
-        })?;
-        let last_received = if decoder.bool()? {
-            Some(LastReceived {
-                message_id: decoder.varint()?,
-                signature: decoder.slice()?,
-            })
-        } else {
-            None
-        };
         Ok(Self {
             command,
             timestamp,
             salt,
             argument_signatures,
             signed_preview,
-            last_seen_messages,
-            last_received,
         })
     }
 }
 
+/// A previously seen chat message: its sender and signature.
+#[derive(Debug, Clone)]
+pub struct LastSeenMessage<'a> {
+    pub sender: Uuid,
+    pub signature: &'a [u8],
+}
+
+/// `Chat Message` (0x05).
+///
+/// Hand-written `Decode`: the signature is length-prefixed (empty means
+/// absent), and the "last received" entry is gated by a boolean.
 #[derive(Debug, Clone)]
 pub struct ChatMessage<'a> {
     pub message: &'a str,
@@ -115,7 +97,7 @@ pub struct ChatMessage<'a> {
     pub signature: Option<&'a [u8]>,
     pub signed_preview: bool,
     pub last_seen_messages: Vec<LastSeenMessage<'a>>,
-    pub last_received: Option<LastReceived<'a>>,
+    pub last_received: Option<LastSeenMessage<'a>>,
 }
 
 impl<'a> Decode<'a> for ChatMessage<'a> {
@@ -127,13 +109,13 @@ impl<'a> Decode<'a> for ChatMessage<'a> {
         let signed_preview = decoder.bool()?;
         let last_seen_messages = counted(decoder, |d| {
             Ok(LastSeenMessage {
+                sender: d.uuid()?,
                 signature: d.slice()?,
-                message_id: d.varint()?,
             })
         })?;
         let last_received = if decoder.bool()? {
-            Some(LastReceived {
-                message_id: decoder.varint()?,
+            Some(LastSeenMessage {
+                sender: decoder.uuid()?,
                 signature: decoder.slice()?,
             })
         } else {
