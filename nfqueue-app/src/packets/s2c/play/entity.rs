@@ -178,9 +178,10 @@ pub struct MetadataEntry<'a> {
 
 /// The metadata value types of protocol 760.
 ///
-/// This is the **1.19.2** table (ids 0-18). It is not the modern one: 1.20.5
-/// inserted `VarLong`, `BlockState`, `OptBlockState` and `Particles` and shifted
-/// everything after `Float`, so using the newer table desynchronises every
+/// This is the **1.19.2** table (ids 0-20). It is not the modern one: 1.20.5
+/// inserted `VarLong`, `BlockState`, `OptBlockState` and `Particles`, replaced
+/// `OptUuid`/`OptBlockId` with `OptLivingEntityRef` and dropped `NBT`, which
+/// shifts every id after `Float`. Using the newer table desynchronises every
 /// metadata entry.
 #[derive(Debug, Clone)]
 pub enum MetadataValue<'a> {
@@ -212,6 +213,10 @@ pub enum MetadataValue<'a> {
     /// `0` means absent, otherwise the value is `1 + actual`.
     OptVarInt(Option<VarInt>),
     Pose(VarInt),
+    /// An id in the `minecraft:cat_variant` registry.
+    CatVariant(VarInt),
+    /// An id in the `minecraft:frog_variant` registry.
+    FrogVariant(VarInt),
 }
 
 impl<'a> MetadataValue<'a> {
@@ -260,6 +265,8 @@ impl<'a> MetadataValue<'a> {
                 n => Some(VarInt::new(n - 1)),
             }),
             18 => Self::Pose(decoder.varint()?),
+            19 => Self::CatVariant(decoder.varint()?),
+            20 => Self::FrogVariant(decoder.varint()?),
             other => return Err(Error::UnknownOpcode(other)),
         })
     }

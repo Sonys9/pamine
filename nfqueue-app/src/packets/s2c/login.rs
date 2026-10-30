@@ -35,9 +35,8 @@ pub struct EncryptionRequest<'a> {
 
 /// One signed skin/cape property of a player profile.
 ///
-/// `signature` uses the NBT string framing (`u16` length), not the VarInt one:
-/// the wiki types it as `Optional String (32767)` inside an `Array of String`,
-/// and that array is written with `writeString`, i.e. `u16`-prefixed.
+/// `String (32767)` in the wiki is a protocol String — VarInt length plus a
+/// maximum character count — not the NBT `u16` framing.
 #[derive(Debug, Clone)]
 pub struct Property<'a> {
     pub name: &'a str,
@@ -47,13 +46,13 @@ pub struct Property<'a> {
 
 impl<'a> Decode<'a> for Property<'a> {
     fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
-        let name = decoder.string_u16()?;
-        let value = decoder.string_u16()?;
-        // A zero-length signature means "not signed".
-        let signature = if decoder.u8()? == 0 {
-            None
+        let name = decoder.string()?;
+        let value = decoder.string()?;
+        // `Is Signed` gates the signature.
+        let signature = if decoder.bool()? {
+            Some(decoder.string()?)
         } else {
-            Some(decoder.string_u16()?)
+            None
         };
         Ok(Self {
             name,

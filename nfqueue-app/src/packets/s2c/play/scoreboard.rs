@@ -119,9 +119,8 @@ impl<'a> Decode<'a> for UpdateTeams<'a> {
 
 /// Reads the `Array of String (40)` of a team.
 ///
-/// The count is a VarInt, but each entry uses the NBT string framing (`u16`
-/// length), not the VarInt one — this is the one place in the play state where
-/// the two framings are mixed.
+/// `String (40)` is a protocol String — VarInt length plus a 40-character
+/// limit — not the NBT `u16` framing.
 fn team_entities<'a>(decoder: &mut Decoder<'a>) -> Result<Vec<&'a str>, Error> {
     let len = decoder.varint()?.get();
     if len < 0 {
@@ -133,7 +132,7 @@ fn team_entities<'a>(decoder: &mut Decoder<'a>) -> Result<Vec<&'a str>, Error> {
     }
     let mut entities = Vec::with_capacity(len);
     for _ in 0..len {
-        entities.push(decoder.string_u16()?);
+        entities.push(decoder.string()?);
     }
     Ok(entities)
 }
