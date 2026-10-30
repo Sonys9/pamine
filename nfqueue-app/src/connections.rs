@@ -14,7 +14,7 @@ use tokio::{
     },
     sync::Mutex,
 };
-use tracing::{error, info};
+use tracing::info;
 
 use crate::packets::{Parser, Side};
 
@@ -114,10 +114,9 @@ impl Connector {
                             info!("[{:?}] parsed packet: {:?}", side, packet);
                             parser.clear(side);
                         }
-                        Err(e) => {
-                            error!("[{:?}] {}", side, e);
-                            break;
-                        }
+                        // Malformed stream: stop parsing this direction. The
+                        // bytes are still forwarded verbatim below.
+                        Err(_) => break,
                     }
                 }
             }
@@ -127,11 +126,23 @@ impl Connector {
     }
 }
 
+/// Recovers the original destination of a redirected connection.
+///
+/// The socket is borrowed from `stream`, not owned: `from_raw_fd` takes
+/// ownership, so it is wrapped in `ManuallyDrop` to stop it closing a
+/// descriptor that `stream` still uses. A plain `mem::forget` would leak the
+/// descriptor on the `?` path below.
 #[inline]
 fn stream_to_target_addr(stream: &TcpStream) -> eyre::Result<SockAddr> {
     let fd = stream.as_raw_fd();
-    let socket = unsafe { socket2::Socket::from_raw_fd(fd) };
-    let target = socket.original_dst_v4()?;
-    std::mem::forget(socket);
-    Ok(target)
+    let socket = std::mem::ManuallyDrop::new(unsafe { socket2::Socket::from_raw_fd(fd) });
+
+    // `original_dst_v4` and `original_dst_v6` are separate socket options, so
+    // the family has to be picked from the local address.
+    let local = stream.local_addr()?;
+    if local.is_ipv6() {
+        Ok(socket.original_dst_v6()?)
+    } else {
+        Ok(socket.original_dst_v4()?)
+    }
 }
