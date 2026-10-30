@@ -86,11 +86,11 @@ mod tests {
     #[test]
     fn filled_slot_with_compound_nbt() {
         // present=1, item_id=1, count=1, nbt={x:7}
-        // Network NBT has no root name, so the compound starts right with its
-        // first entry: TAG_Int, name "x", value 7, then TAG_End.
+        // 1.19.2 writes the root name (empty here) after the type id, so the
+        // compound is `0A 00 00` before its first entry.
         let data = [
             0x01, 0x01, 0x01, // present, id, count
-            0x0A, // compound
+            0x0A, 0x00, 0x00, // compound, empty root name
             0x03, 0x00, 0x01, b'x', 0x00, 0x00, 0x00, 0x07, // x = 7
             0x00, // end
         ];

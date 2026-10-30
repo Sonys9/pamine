@@ -29,11 +29,19 @@ pub enum NbtTag<'a> {
 }
 
 impl<'a> Decoder<'a> {
-    /// Parses a root tag from `src`.
+    /// Parses a root tag.
     ///
-    /// Network NBT has no root name: the payload starts with the type id.
+    /// In 1.19.2 the root tag still carries a name — almost always the empty
+    /// string, written as `00 00` — so it has to be consumed before the
+    /// payload. Only `TAG_End` omits it. The unnamed network format arrived in
+    /// 1.20.2; treating 1.19.2 as unnamed makes the first entry of a compound
+    /// look like `TAG_End` and desynchronises everything after it.
     pub fn nbt(&mut self) -> Result<NbtTag<'a>, Error> {
         let id = self.u8()?;
+        if id != 0 {
+            // The name is not used, but it occupies bytes on the wire.
+            let _root_name = self.nbt_string()?;
+        }
         self.nbt_parse(id, 0)
     }
 
@@ -42,7 +50,12 @@ impl<'a> Decoder<'a> {
     /// `decoder` is taken by mutable reference: `Decoder` is `Copy`, so passing
     /// it by value would advance a copy and leave the caller's cursor untouched.
     fn nbt_parse(&mut self, id: u8, depth: usize) -> Result<NbtTag<'a>, Error> {
-        println!("current id: {} depth: {} next 8 bytes: {:?}", id, depth, &self.get()[..self.get().len().min(8)]);
+        println!(
+            "current id: {} depth: {} next 8 bytes: {:?}",
+            id,
+            depth,
+            &self.get()[..self.get().len().min(8)]
+        );
         if depth > MAX_DEPTH {
             return Err(Error::Nbt("nesting too deep"));
         }
@@ -100,7 +113,10 @@ impl<'a> Decoder<'a> {
     }
 
     /// Reads a length-prefixed array, decoding each element with `read`.
-    fn nbt_array<T>(&mut self, read: fn(&mut Decoder<'a>) -> Result<T, Error>) -> Result<Vec<T>, Error> {
+    fn nbt_array<T>(
+        &mut self,
+        read: fn(&mut Decoder<'a>) -> Result<T, Error>,
+    ) -> Result<Vec<T>, Error> {
         let len = self.nbt_array_len()?;
         let mut out = Vec::with_capacity(len);
         for _ in 0..len {
@@ -137,39 +153,53 @@ mod tests {
         Decoder::new(bytes).nbt()
     }
 
+    /// Builds a root tag: type id, empty root name, then `payload`.
+    ///
+    /// 1.19.2 always writes the root name, so every fixture needs the `00 00`
+    /// that follows the type id.
+    fn root(id: u8, payload: &[u8]) -> Vec<u8> {
+        let mut data = vec![id, 0, 0];
+        data.extend_from_slice(payload);
+        data
+    }
+
     #[test]
     fn reads_byte() {
-        // type=1, value=0x7f
-        assert_eq!(parse(&[1, 0x7f]).unwrap(), NbtTag::Byte(127));
+        // type=1, name="", value=0x7f
+        assert_eq!(parse(&root(1, &[0x7f])).unwrap(), NbtTag::Byte(127));
     }
 
     #[test]
     fn reads_short_and_int() {
-        assert_eq!(parse(&[2, 0x01, 0x00]).unwrap(), NbtTag::Short(256));
-        assert_eq!(parse(&[3, 0x00, 0x00, 0x01, 0x00]).unwrap(), NbtTag::Int(256));
+        assert_eq!(parse(&root(2, &[0x01, 0x00])).unwrap(), NbtTag::Short(256));
+        assert_eq!(
+            parse(&root(3, &[0x00, 0x00, 0x01, 0x00])).unwrap(),
+            NbtTag::Int(256)
+        );
     }
 
     #[test]
     fn reads_string_with_u16_length() {
-        let mut data = vec![8u8, 0, 5];
-        data.extend_from_slice(b"hello");
-        assert_eq!(parse(&data).unwrap(), NbtTag::String("hello"));
+        let mut payload = vec![0, 5];
+        payload.extend_from_slice(b"hello");
+        assert_eq!(parse(&root(8, &payload)).unwrap(), NbtTag::String("hello"));
     }
 
     #[test]
     fn reads_empty_compound() {
-        assert_eq!(parse(&[10, 0]).unwrap(), NbtTag::Compound(vec![]));
+        // type=10, name="", then TAG_End
+        assert_eq!(parse(&root(10, &[0])).unwrap(), NbtTag::Compound(vec![]));
     }
 
     #[test]
     fn compound_preserves_order_and_advances() {
         // {b:1b, a:2b}
-        let data = [
-            10u8, //
+        let payload = [
             1, 0, 1, b'b', 1, // b = 1
             1, 0, 1, b'a', 2, // a = 2
             0, // end
         ];
+        let data = root(10, &payload);
         let NbtTag::Compound(entries) = parse(&data).unwrap() else {
             panic!("expected compound");
         };
@@ -182,61 +212,98 @@ mod tests {
 
     #[test]
     fn reads_empty_list() {
-        // type=9, elem_type=0, len=0
-        assert_eq!(parse(&[9, 0, 0, 0, 0, 0]).unwrap(), NbtTag::List(vec![]));
+        // type=9, name="", elem_type=0, len=0
+        assert_eq!(
+            parse(&root(9, &[0, 0, 0, 0, 0])).unwrap(),
+            NbtTag::List(vec![])
+        );
     }
 
     #[test]
     fn reads_list_of_ints() {
-        // type=9, elem_type=3, len=2, 1, 2
-        let data = [
-            9u8, 3, 0, 0, 0, 2, // header
+        // type=9, name="", elem_type=3, len=2, 1, 2
+        let payload = [
+            3, 0, 0, 0, 2, // header
             0, 0, 0, 1, // 1
             0, 0, 0, 2, // 2
         ];
         assert_eq!(
-            parse(&data).unwrap(),
+            parse(&root(9, &payload)).unwrap(),
             NbtTag::List(vec![NbtTag::Int(1), NbtTag::Int(2)])
         );
     }
 
     #[test]
     fn reads_byte_array() {
-        // type=7, len=3, [1,2,3]
+        // type=7, name="", len=3, [1,2,3]
         assert_eq!(
-            parse(&[7, 0, 0, 0, 3, 1, 2, 3]).unwrap(),
+            parse(&root(7, &[0, 0, 0, 3, 1, 2, 3])).unwrap(),
             NbtTag::ByteArray(&[1, 2, 3])
         );
     }
 
     #[test]
     fn reads_int_array() {
-        // type=11, len=2, 1, 2
-        let data = [11u8, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 2];
-        assert_eq!(parse(&data).unwrap(), NbtTag::IntArray(vec![1, 2]));
+        // type=11, name="", len=2, 1, 2
+        assert_eq!(
+            parse(&root(11, &[0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 2])).unwrap(),
+            NbtTag::IntArray(vec![1, 2])
+        );
     }
 
     #[test]
     fn reads_long_array() {
-        // type=12, len=1, 1
-        let mut data = vec![12u8, 0, 0, 0, 1];
-        data.extend_from_slice(&1i64.to_be_bytes());
-        assert_eq!(parse(&data).unwrap(), NbtTag::LongArray(vec![1]));
+        // type=12, name="", len=1, 1
+        let mut payload = vec![0, 0, 0, 1];
+        payload.extend_from_slice(&1i64.to_be_bytes());
+        assert_eq!(
+            parse(&root(12, &payload)).unwrap(),
+            NbtTag::LongArray(vec![1])
+        );
+    }
+
+    #[test]
+    fn reads_named_root() {
+        // A non-empty root name must be consumed, not treated as payload.
+        let mut data = vec![1u8, 0, 4];
+        data.extend_from_slice(b"root");
+        data.push(0x7f);
+        assert_eq!(parse(&data).unwrap(), NbtTag::Byte(127));
+    }
+
+    #[test]
+    fn reads_heightmaps_style_compound() {
+        // The shape that broke Chunk Data: a compound whose first entry is a
+        // long array named MOTION_BLOCKING.
+        let mut payload = vec![12u8, 0, 15];
+        payload.extend_from_slice(b"MOTION_BLOCKING");
+        payload.extend_from_slice(&[0, 0, 0, 1]); // one long
+        payload.extend_from_slice(&1i64.to_be_bytes());
+        payload.push(0); // end of compound
+
+        let data = root(10, &payload);
+        let NbtTag::Compound(entries) = parse(&data).unwrap() else {
+            panic!("expected compound");
+        };
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0, "MOTION_BLOCKING");
+        assert_eq!(entries[0].1, NbtTag::LongArray(vec![1]));
     }
 
     #[test]
     fn rejects_negative_length() {
-        // type=7, len=-1
-        assert!(parse(&[7, 0xff, 0xff, 0xff, 0xff]).is_err());
+        // type=7, name="", len=-1
+        assert!(parse(&root(7, &[0xff, 0xff, 0xff, 0xff])).is_err());
     }
 
     #[test]
     fn rejects_length_over_limit() {
-        // type=7, len = MAX_ELEMENTS + 1
+        // type=7, name="", len = MAX_ELEMENTS + 1
         let len = (MAX_ELEMENTS as i32) + 1;
-        let mut data = vec![7u8];
-        data.extend_from_slice(&len.to_be_bytes());
-        assert!(matches!(parse(&data), Err(Error::LenLimit(_))));
+        assert!(matches!(
+            parse(&root(7, &len.to_be_bytes())),
+            Err(Error::LenLimit(_))
+        ));
     }
 
     #[test]
@@ -246,24 +313,25 @@ mod tests {
 
     #[test]
     fn rejects_non_empty_list_of_end() {
-        // type=9, elem_type=0, len=1
-        assert!(parse(&[9, 0, 0, 0, 0, 1]).is_err());
+        // type=9, name="", elem_type=0, len=1
+        assert!(parse(&root(9, &[0, 0, 0, 0, 1])).is_err());
     }
 
     #[test]
     fn rejects_excessive_nesting() {
         // MAX_DEPTH + 2 nested compounds, each with an empty name, never closed.
-        let mut data = vec![10u8];
+        let mut payload = Vec::new();
         for _ in 0..=MAX_DEPTH {
-            data.extend_from_slice(&[10, 0, 0]); // compound, empty name
+            payload.extend_from_slice(&[10, 0, 0]); // compound, empty name
         }
-        assert!(matches!(parse(&data), Err(Error::Nbt(_))));
+        assert!(matches!(parse(&root(10, &payload)), Err(Error::Nbt(_))));
     }
 
     #[test]
     fn advances_the_caller_cursor() {
-        // Two consecutive tags: Byte(1) then Int(2).
-        let data = [1u8, 0x01, 3, 0, 0, 0, 2];
+        // Two consecutive root tags: Byte(1) then Int(2).
+        let mut data = root(1, &[0x01]);
+        data.extend_from_slice(&root(3, &[0, 0, 0, 2]));
         let mut decoder = Decoder::new(&data);
 
         assert_eq!(decoder.nbt().unwrap(), NbtTag::Byte(1));
