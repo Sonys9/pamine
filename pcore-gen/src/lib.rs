@@ -259,6 +259,9 @@ fn decode_type(ty: &Type) -> proc_macro2::TokenStream {
                 // Owned String: the only case that must allocate, because the
                 // field type owns its data. Prefer `&'a str` to avoid the copy.
                 "String" => return quote! { decoder.string().map(str::to_owned) },
+                // NBT is self-describing: the tag type id is on the wire, so the
+                // decoder reads it and dispatches internally.
+                "NbtTag" => return quote! { decoder.nbt() },
                 // Fallback: assume type implements ::pcore::Decode
                 _ => return quote! { ::pcore::Decode::decode(decoder) },
             }

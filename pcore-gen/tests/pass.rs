@@ -1,7 +1,7 @@
 //! Positive tests - these should compile successfully
 
 use pcore_gen::{Decode, DecodePacket};
-use pcore::decoder::{VarInt, VarLong, Uuid};
+use pcore::decoder::{NbtTag, VarInt, VarLong, Uuid};
 
 // Test basic struct with primitive types (only those supported by decoder)
 #[derive(Decode)]
@@ -90,6 +90,22 @@ struct WithU32 {
 struct GenericStruct<'a> {
     data: &'a [u8],
     id: VarInt,
+}
+
+// Test NBT field - the tag type id is on the wire, so no extra prefix
+#[derive(Decode)]
+struct WithNbt<'a> {
+    id: VarInt,
+    data: NbtTag<'a>,
+}
+
+// Test NBT inside a packet variant
+#[derive(DecodePacket)]
+enum PacketWithNbt<'a> {
+    #[id(0)]
+    WithNbt(WithNbt<'a>),
+    #[id(1)]
+    Empty,
 }
 
 // Test enum with DecodePacket - only unnamed single field and unit variants
