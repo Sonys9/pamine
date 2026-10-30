@@ -110,16 +110,16 @@ impl Connector {
                         // `None` means the buffer holds only a partial packet;
                         // wait for the next read instead of logging an error.
                         Ok(None) => break,
-                        Ok(Some(_packet)) => {
-                            // info!("[{:?}] parsed packet: {:?}", side, packet);
+                        Ok(Some(packet)) => {
+                            info!("[{:?}] parsed packet: {:?}", side, packet);
                             parser.clear(side);
                         }
-                        // Malformed stream: stop parsing this direction. The
-                        // bytes are still forwarded verbatim below.
                         Err(e) => {
                             error!(
-                                "[{:?}] parse error: {} got buffer: {:?} (could be not full, that's end part)",
-                                side, e, &buffer
+                                "[{:?}] parse error: {} got buffer: {:?} (could be not full, that's end part, max 50 bytes)",
+                                side,
+                                e,
+                                &buffer[..len.min(50)] // we dont need more right?
                             );
                         }
                     }
