@@ -135,8 +135,10 @@ pub struct ChangeDifficulty {
 #[derive(Decode, Debug, Clone)]
 pub struct MessageAcknowledgment<'a> {
     pub has_data: bool,
-    pub profile_id: Option<Uuid>,
-    pub last_signature: Option<&'a [u8]>,
+    /// `profile_id` + `last_signature` when `has_data` is set. Kept raw
+    /// because the signature is VarInt-length-prefixed, not bool-gated.
+    #[decode(rest)]
+    pub data: &'a [u8],
 }
 
 #[derive(Decode, Debug, Clone)]
@@ -144,8 +146,10 @@ pub struct ChatCommand<'a> {
     pub command: &'a str,
     pub timestamp: i64,
     pub salt: i64,
+    /// VarInt count of `(name, signature)` pairs, then `signed_preview`.
+    /// Kept raw because the count is an element count.
+    #[decode(rest)]
     pub argument_signatures: &'a [u8],
-    pub signed_preview: bool,
 }
 
 #[derive(Decode, Debug, Clone)]
@@ -153,9 +157,10 @@ pub struct ChatMessage<'a> {
     pub message: &'a str,
     pub timestamp: i64,
     pub salt: i64,
-    pub signature: Option<&'a [u8]>,
-    pub signed_preview: bool,
-    pub seen_messages: &'a [u8],
+    /// Signature length + bytes, then `signed_preview` and the seen-message
+    /// list. Kept raw because the length prefix is a VarInt, not a bool.
+    #[decode(rest)]
+    pub signature_and_rest: &'a [u8],
 }
 
 #[derive(Decode, Debug, Clone)]
@@ -200,8 +205,9 @@ pub struct ClickContainer<'a> {
     pub slot: i16,
     pub button: i8,
     pub mode: VarInt,
-    pub changed_slots: &'a [u8],
-    pub carried_item: &'a [u8],
+    /// VarInt count of `(slot, Slot)` pairs, then the carried Slot.
+    #[decode(rest)]
+    pub changed_slots_and_carried: &'a [u8],
 }
 
 #[derive(Decode, Debug, Clone)]
@@ -218,9 +224,9 @@ pub struct PluginMessage<'a> {
 #[derive(Decode, Debug, Clone)]
 pub struct EditBook<'a> {
     pub slot: VarInt,
+    /// VarInt count of pages, then `has_title` and the optional title.
+    #[decode(rest)]
     pub entries: &'a [u8],
-    pub has_title: bool,
-    pub title: Option<&'a str>,
 }
 
 #[derive(Decode, Debug, Clone)]
@@ -410,6 +416,8 @@ pub struct ProgramCommandBlockMinecart<'a> {
 #[derive(Decode, Debug, Clone)]
 pub struct SetCreativeModeSlot<'a> {
     pub slot: i16,
+    /// A single Slot: `bool present + VarInt id + i8 count + NBT`.
+    #[decode(rest)]
     pub clicked_item: &'a [u8],
 }
 

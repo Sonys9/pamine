@@ -34,6 +34,7 @@ pub use state::Packet;
 use pcore::decoder::Decoder;
 
 use frame::{inflate, Frame};
+use tracing::info;
 
 pub struct Parser {
     state: State,
@@ -103,6 +104,7 @@ impl Parser {
 
         let mut decoder = Decoder::new(body);
         let opcode = decoder.varint()?.get();
+        info!("Packet opcode: {}", opcode);
 
         // Advance only after the frame was fully validated. Assign the field
         // directly: `stream.advance(..)` would re-borrow the whole struct while

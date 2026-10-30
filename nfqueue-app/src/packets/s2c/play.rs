@@ -6,7 +6,8 @@
 
 use pcore::{
     Decode,
-    decoder::{NbtTag, Uuid, VarInt},
+    decoder::{Decoder, NbtTag, Uuid, VarInt},
+    errors::Error,
 };
 use pcore_gen::DecodePacket;
 
@@ -273,10 +274,39 @@ pub struct EntityAnimation {
     pub animation: u8,
 }
 
-#[derive(Decode, Debug, Clone)]
+/// `statistics` is `count` entries of `(category, statistic, value)`, not a
+/// byte array — the count is an element count, so the derive macro cannot
+/// express it.
+#[derive(Debug, Clone)]
 pub struct AwardStatistics<'a> {
-    pub count: VarInt,
-    pub statistics: &'a [u8],
+    pub statistics: Vec<Statistic<'a>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Statistic<'a> {
+    pub category_id: VarInt,
+    pub statistic_id: VarInt,
+    pub value: VarInt,
+    _marker: std::marker::PhantomData<&'a ()>,
+}
+
+impl<'a> Decode<'a> for AwardStatistics<'a> {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        let count = decoder.varint()?.get();
+        if count < 0 {
+            return Err(Error::Nbt("negative statistic count"));
+        }
+        let mut statistics = Vec::with_capacity(count as usize);
+        for _ in 0..count {
+            statistics.push(Statistic {
+                category_id: decoder.varint()?,
+                statistic_id: decoder.varint()?,
+                value: decoder.varint()?,
+                _marker: std::marker::PhantomData,
+            });
+        }
+        Ok(Self { statistics })
+    }
 }
 
 #[derive(Decode, Debug, Clone)]
@@ -316,6 +346,9 @@ pub struct BlockUpdate {
 pub struct BossBar<'a> {
     pub uuid: Uuid,
     pub action: VarInt,
+    /// Layout depends on `action` (add / remove / health / title / style /
+    /// flags), so the remainder is kept raw.
+    #[decode(rest)]
     pub payload: &'a [u8],
 }
 
@@ -342,14 +375,96 @@ pub struct CommandSuggestionsResponse<'a> {
     pub id: VarInt,
     pub start: VarInt,
     pub length: VarInt,
+    /// `count` matches, each `String + bool + optional tooltip`.
+    #[decode(rest)]
     pub matches: &'a [u8],
 }
 
-#[derive(Decode, Debug, Clone)]
+/// The command graph. `nodes` is a VarInt **count** of variable-length node
+/// structures, so it has to be parsed element by element.
+#[derive(Debug, Clone)]
 pub struct Commands<'a> {
-    pub count: VarInt,
-    pub nodes: &'a [u8],
+    pub nodes: Vec<CommandNode<'a>>,
     pub root_index: VarInt,
+}
+
+/// One node of the command graph.
+///
+/// `flags` bit 0x03 selects the node type: 0 = root, 1 = literal, 2 = argument.
+/// Bit 0x04 marks an executable node, 0x08 a redirect and 0x10 suggestions.
+#[derive(Debug, Clone)]
+pub struct CommandNode<'a> {
+    pub flags: u8,
+    pub children: Vec<VarInt>,
+    pub redirect: Option<VarInt>,
+    pub name: Option<&'a str>,
+    pub parser_id: Option<VarInt>,
+    pub suggestions: Option<&'a str>,
+}
+
+impl<'a> Decode<'a> for Commands<'a> {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        let count = decoder.varint()?.get();
+        if count < 0 {
+            return Err(Error::Nbt("negative command node count"));
+        }
+        let mut nodes = Vec::with_capacity(count as usize);
+        for _ in 0..count {
+            nodes.push(CommandNode::decode(decoder)?);
+        }
+        let root_index = decoder.varint()?;
+        Ok(Self { nodes, root_index })
+    }
+}
+
+impl<'a> Decode<'a> for CommandNode<'a> {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        const TYPE_MASK: u8 = 0x03;
+        const REDIRECT: u8 = 0x08;
+        const SUGGESTIONS: u8 = 0x10;
+
+        let flags = decoder.u8()?;
+
+        let child_count = decoder.varint()?.get();
+        if child_count < 0 {
+            return Err(Error::Nbt("negative child count"));
+        }
+        let mut children = Vec::with_capacity(child_count as usize);
+        for _ in 0..child_count {
+            children.push(decoder.varint()?);
+        }
+
+        let redirect = if flags & REDIRECT != 0 {
+            Some(decoder.varint()?)
+        } else {
+            None
+        };
+
+        // Root nodes (type 0) carry no name. Literal (1) and argument (2) nodes
+        // both start with a name; argument nodes add a parser id and then
+        // parser-specific properties, which have no length prefix and are
+        // therefore not consumed here.
+        let (name, parser_id) = match flags & TYPE_MASK {
+            0 => (None, None),
+            1 => (Some(decoder.string()?), None),
+            _ => (Some(decoder.string()?), Some(decoder.varint()?)),
+        };
+
+        let suggestions = if flags & SUGGESTIONS != 0 {
+            Some(decoder.string()?)
+        } else {
+            None
+        };
+
+        Ok(Self {
+            flags,
+            children,
+            redirect,
+            name,
+            parser_id,
+            suggestions,
+        })
+    }
 }
 
 #[derive(Decode, Debug, Clone)]
@@ -362,8 +477,10 @@ pub struct SetContainerContent<'a> {
     pub window_id: u8,
     pub state_id: VarInt,
     pub count: VarInt,
-    pub slots: &'a [u8],
-    pub carried_item: &'a [u8],
+    /// `count` Slot structures, then the carried Slot. Both are kept raw
+    /// because a Slot is `bool + VarInt id + i8 count + NBT`.
+    #[decode(rest)]
+    pub slots_and_carried: &'a [u8],
 }
 
 #[derive(Decode, Debug, Clone)]
@@ -378,6 +495,8 @@ pub struct SetContainerSlot<'a> {
     pub window_id: i8,
     pub state_id: VarInt,
     pub slot: i16,
+    /// A single Slot: `bool present + VarInt id + i8 count + NBT`.
+    #[decode(rest)]
     pub slot_data: &'a [u8],
 }
 
@@ -397,6 +516,9 @@ pub struct ChatSuggestions<'a> {
 #[derive(Decode, Debug, Clone)]
 pub struct PluginMessage<'a> {
     pub channel: &'a str,
+    /// Everything after the channel: the payload has no length prefix, its
+    /// length is whatever remains in the packet.
+    #[decode(rest)]
     pub data: &'a [u8],
 }
 
@@ -435,10 +557,10 @@ pub struct Explosion<'a> {
     pub z: f32,
     pub strength: f32,
     pub record_count: VarInt,
-    pub records: &'a [u8],
-    pub player_motion_x: f32,
-    pub player_motion_y: f32,
-    pub player_motion_z: f32,
+    /// `record_count` 3-byte offsets, then three player-motion floats. Kept
+    /// raw because the trailing floats follow a counted array.
+    #[decode(rest)]
+    pub records_and_motion: &'a [u8],
 }
 
 #[derive(Decode, Debug, Clone)]
@@ -477,16 +599,131 @@ pub struct KeepAlive {
     pub keep_alive_id: i64,
 }
 
-#[derive(Decode, Debug, Clone)]
+/// Chunk data plus light updates.
+///
+/// Hand-written `Decode`: the wire layout has three parts the derive macro
+/// cannot express.
+///
+/// - `data` is a byte array whose length is the `Size` field, i.e. the VarInt
+///   prefix *is* `Size` — there is no separate field to read.
+/// - `block_entities` is a VarInt **count** followed by that many structures,
+///   not a byte length.
+/// - the light section is four BitSets followed by two length-prefixed arrays
+///   of 2048-byte arrays.
+#[derive(Debug, Clone)]
 pub struct ChunkDataAndUpdateLight<'a> {
     pub chunk_x: i32,
     pub chunk_z: i32,
     pub heightmaps: NbtTag<'a>,
-    pub size: VarInt,
     pub data: &'a [u8],
-    pub block_entities: &'a [u8],
+    pub block_entities: Vec<BlockEntity<'a>>,
     pub trust_edges: bool,
-    pub light_data: &'a [u8],
+    pub light: LightData<'a>,
+}
+
+impl<'a> Decode<'a> for ChunkDataAndUpdateLight<'a> {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        let chunk_x = decoder.i32()?;
+        let chunk_z = decoder.i32()?;
+        let heightmaps = decoder.nbt()?;
+        // `slice()` consumes the `Size` VarInt as its own length prefix.
+        let data = decoder.slice()?;
+
+        let count = decoder.varint()?.get();
+        if count < 0 {
+            return Err(Error::Nbt("negative block entity count"));
+        }
+        let mut block_entities = Vec::with_capacity(count as usize);
+        for _ in 0..count {
+            block_entities.push(BlockEntity::decode(decoder)?);
+        }
+
+        let trust_edges = decoder.bool()?;
+        let light = LightData::decode(decoder)?;
+
+        Ok(Self {
+            chunk_x,
+            chunk_z,
+            heightmaps,
+            data,
+            block_entities,
+            trust_edges,
+            light,
+        })
+    }
+}
+
+/// One block entity inside a chunk.
+#[derive(Debug, Clone)]
+pub struct BlockEntity<'a> {
+    /// `(blockX & 15) << 4 | (blockZ & 15)`
+    pub packed_xz: u8,
+    pub y: i16,
+    pub kind: VarInt,
+    pub data: NbtTag<'a>,
+}
+
+impl<'a> Decode<'a> for BlockEntity<'a> {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        Ok(Self {
+            packed_xz: decoder.u8()?,
+            y: decoder.i16()?,
+            kind: decoder.varint()?,
+            data: decoder.nbt()?,
+        })
+    }
+}
+
+/// Light section shared by `Chunk Data` and `Update Light`.
+#[derive(Debug, Clone)]
+pub struct LightData<'a> {
+    pub sky_light_mask: &'a [u8],
+    pub block_light_mask: &'a [u8],
+    pub empty_sky_light_mask: &'a [u8],
+    pub empty_block_light_mask: &'a [u8],
+    pub sky_light: Vec<&'a [u8]>,
+    pub block_light: Vec<&'a [u8]>,
+}
+
+impl<'a> Decode<'a> for LightData<'a> {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        let sky_light_mask = bitset(decoder)?;
+        let block_light_mask = bitset(decoder)?;
+        let empty_sky_light_mask = bitset(decoder)?;
+        let empty_block_light_mask = bitset(decoder)?;
+        let sky_light = light_arrays(decoder)?;
+        let block_light = light_arrays(decoder)?;
+        Ok(Self {
+            sky_light_mask,
+            block_light_mask,
+            empty_sky_light_mask,
+            empty_block_light_mask,
+            sky_light,
+            block_light,
+        })
+    }
+}
+
+/// A BitSet is a VarInt count of `i64` words, then that many words.
+fn bitset<'a>(decoder: &mut Decoder<'a>) -> Result<&'a [u8], Error> {
+    let count = decoder.varint()?.get();
+    if count < 0 {
+        return Err(Error::Nbt("negative bitset length"));
+    }
+    decoder.read_len(count as usize * 8)
+}
+
+/// A length-prefixed array of length-prefixed 2048-byte arrays.
+fn light_arrays<'a>(decoder: &mut Decoder<'a>) -> Result<Vec<&'a [u8]>, Error> {
+    let count = decoder.varint()?.get();
+    if count < 0 {
+        return Err(Error::Nbt("negative light array count"));
+    }
+    let mut out = Vec::with_capacity(count as usize);
+    for _ in 0..count {
+        out.push(decoder.slice()?);
+    }
+    Ok(out)
 }
 
 #[derive(Decode, Debug, Clone)]
@@ -512,22 +749,36 @@ pub struct Particle<'a> {
     pub data: &'a [u8],
 }
 
-#[derive(Decode, Debug, Clone)]
+/// Light-only update for a chunk. Shares the light section with
+/// [`ChunkDataAndUpdateLight`], so it needs the same hand-written `Decode`.
+#[derive(Debug, Clone)]
 pub struct UpdateLight<'a> {
     pub chunk_x: VarInt,
     pub chunk_z: VarInt,
     pub trust_edges: bool,
-    pub light_data: &'a [u8],
+    pub light: LightData<'a>,
 }
 
-#[derive(Decode, Debug, Clone)]
+impl<'a> Decode<'a> for UpdateLight<'a> {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        Ok(Self {
+            chunk_x: decoder.varint()?,
+            chunk_z: decoder.varint()?,
+            trust_edges: decoder.bool()?,
+            light: LightData::decode(decoder)?,
+        })
+    }
+}
+
+/// Join-game packet. Hand-written `Decode` because `dimension_names` is a
+/// VarInt **count** of Identifiers, not a byte array.
+#[derive(Debug, Clone)]
 pub struct Login<'a> {
     pub entity_id: i32,
     pub is_hardcore: bool,
     pub gamemode: u8,
     pub previous_gamemode: i8,
-    pub dimension_count: VarInt,
-    pub dimension_names: &'a [u8],
+    pub dimension_names: Vec<&'a str>,
     pub registry_codec: NbtTag<'a>,
     pub dimension_type: &'a str,
     pub dimension_name: &'a str,
@@ -539,9 +790,66 @@ pub struct Login<'a> {
     pub enable_respawn_screen: bool,
     pub is_debug: bool,
     pub is_flat: bool,
-    pub has_death_location: bool,
     pub death_dimension_name: Option<&'a str>,
     pub death_location: Option<u64>,
+}
+
+impl<'a> Decode<'a> for Login<'a> {
+    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+        let entity_id = decoder.i32()?;
+        let is_hardcore = decoder.bool()?;
+        let gamemode = decoder.u8()?;
+        let previous_gamemode = decoder.i8()?;
+
+        let dimension_count = decoder.varint()?.get();
+        if dimension_count < 0 {
+            return Err(Error::Nbt("negative dimension count"));
+        }
+        let mut dimension_names = Vec::with_capacity(dimension_count as usize);
+        for _ in 0..dimension_count {
+            dimension_names.push(decoder.string()?);
+        }
+
+        let registry_codec = decoder.nbt()?;
+        let dimension_type = decoder.string()?;
+        let dimension_name = decoder.string()?;
+        let hashed_seed = decoder.i64()?;
+        let max_players = decoder.varint()?;
+        let view_distance = decoder.varint()?;
+        let simulation_distance = decoder.varint()?;
+        let reduced_debug_info = decoder.bool()?;
+        let enable_respawn_screen = decoder.bool()?;
+        let is_debug = decoder.bool()?;
+        let is_flat = decoder.bool()?;
+
+        let has_death_location = decoder.bool()?;
+        let (death_dimension_name, death_location) = if has_death_location {
+            (Some(decoder.string()?), Some(decoder.u64()?))
+        } else {
+            (None, None)
+        };
+
+        Ok(Self {
+            entity_id,
+            is_hardcore,
+            gamemode,
+            previous_gamemode,
+            dimension_names,
+            registry_codec,
+            dimension_type,
+            dimension_name,
+            hashed_seed,
+            max_players,
+            view_distance,
+            simulation_distance,
+            reduced_debug_info,
+            enable_respawn_screen,
+            is_debug,
+            is_flat,
+            death_dimension_name,
+            death_location,
+        })
+    }
 }
 
 #[derive(Decode, Debug, Clone)]
@@ -550,23 +858,19 @@ pub struct MapData<'a> {
     pub scale: i8,
     pub locked: bool,
     pub tracking_position: bool,
+    /// Icon count + icons; only present when `tracking_position` is set, and
+    /// each icon is a fixed 3-byte record plus an optional display name.
+    #[decode(rest)]
     pub icons: &'a [u8],
-    pub columns: u8,
-    pub rows: Option<u8>,
-    pub x: Option<i8>,
-    pub z: Option<i8>,
-    pub data: &'a [u8],
 }
 
 #[derive(Decode, Debug, Clone)]
 pub struct MerchantOffers<'a> {
     pub window_id: VarInt,
     pub size: VarInt,
+    /// `size` trade structures, each with variable-length slots.
+    #[decode(rest)]
     pub trades: &'a [u8],
-    pub villager_level: VarInt,
-    pub experience: VarInt,
-    pub is_regular_villager: bool,
-    pub can_restock: bool,
 }
 
 #[derive(Decode, Debug, Clone)]
@@ -683,6 +987,8 @@ pub struct CombatDeath<'a> {
 pub struct PlayerInfo<'a> {
     pub actions: u8,
     pub number_of_players: VarInt,
+    /// Per-player payload depends on the `actions` bitmask, so it is kept raw.
+    #[decode(rest)]
     pub players: &'a [u8],
 }
 
@@ -720,8 +1026,9 @@ pub struct UpdateRecipeBook<'a> {
     pub blast_furnace_filter_active: bool,
     pub smoker_open: bool,
     pub smoker_filter_active: bool,
+    /// One or two Identifier arrays depending on `action`.
+    #[decode(rest)]
     pub recipe_ids: &'a [u8],
-    pub recipe_ids_2: &'a [u8],
 }
 
 #[derive(Decode, Debug, Clone)]
@@ -771,6 +1078,7 @@ pub struct UpdateSectionBlocks<'a> {
     pub chunk_section_position: i64,
     pub suppress_light_updates: bool,
     pub blocks_array_size: VarInt,
+    #[decode(rest)]
     pub blocks: &'a [u8],
 }
 
@@ -864,6 +1172,9 @@ pub struct DisplayObjective<'a> {
 #[derive(Decode, Debug, Clone)]
 pub struct SetEntityMetadata<'a> {
     pub entity_id: VarInt,
+    /// Entries run until a `0xFF` terminator; kept raw because each entry's
+    /// value type depends on its index.
+    #[decode(rest)]
     pub metadata: &'a [u8],
 }
 
@@ -884,6 +1195,8 @@ pub struct SetEntityVelocity {
 #[derive(Decode, Debug, Clone)]
 pub struct SetEquipment<'a> {
     pub entity_id: VarInt,
+    /// `(slot | 0x80 if more follow, Slot)` pairs, kept raw.
+    #[decode(rest)]
     pub equipment: &'a [u8],
 }
 
@@ -920,6 +1233,9 @@ pub struct SetPassengers<'a> {
 pub struct UpdateTeams<'a> {
     pub team_name: &'a str,
     pub mode: u8,
+    /// Layout depends on `mode` (create / remove / update / add / remove
+    /// entities), so the remainder is kept raw.
+    #[decode(rest)]
     pub payload: &'a [u8],
 }
 
@@ -1028,17 +1344,16 @@ pub struct TeleportEntity {
 pub struct UpdateAdvancements<'a> {
     pub reset: bool,
     pub mapping_size: VarInt,
-    pub advancement_mapping: &'a [u8],
-    pub list_size: VarInt,
-    pub identifiers: &'a [u8],
-    pub progress_size: VarInt,
-    pub progress_mapping: &'a [u8],
+    /// Three nested variable-length sections; kept raw as a whole.
+    #[decode(rest)]
+    pub payload: &'a [u8],
 }
 
 #[derive(Decode, Debug, Clone)]
 pub struct UpdateAttributes<'a> {
     pub entity_id: VarInt,
     pub number_of_properties: VarInt,
+    #[decode(rest)]
     pub properties: &'a [u8],
 }
 
@@ -1056,11 +1371,13 @@ pub struct EntityEffect<'a> {
 #[derive(Decode, Debug, Clone)]
 pub struct UpdateRecipes<'a> {
     pub num_recipes: VarInt,
+    #[decode(rest)]
     pub recipes: &'a [u8],
 }
 
 #[derive(Decode, Debug, Clone)]
 pub struct UpdateTags<'a> {
     pub length_of_the_array: VarInt,
+    #[decode(rest)]
     pub tags: &'a [u8],
 }

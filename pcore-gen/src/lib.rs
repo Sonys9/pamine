@@ -13,7 +13,7 @@ use syn::{Data, DeriveInput, Fields, Meta, Type, parse_macro_input};
 ///     }
 /// }
 /// ```
-#[proc_macro_derive(Decode)]
+#[proc_macro_derive(Decode, attributes(decode))]
 pub fn derive(stream: TokenStream) -> TokenStream {
     let input = parse_macro_input!(stream as DeriveInput);
     match expand_decode(&input) {
@@ -289,6 +289,52 @@ fn extract_option_inner(ty: &Type) -> Option<Type> {
     None
 }
 
+/// How a field's bytes are delimited on the wire.
+enum FieldMode {
+    /// Default: the type decides (VarInt prefix for `&[u8]`, etc.).
+    Typed,
+    /// `#[decode(rest)]` — everything up to the end of the packet.
+    Rest,
+    /// `#[decode(len = "field")]` — exactly `field` bytes, no prefix.
+    Len(syn::Ident),
+}
+
+/// Parses `#[decode(...)]` on a field.
+fn field_mode(field: &syn::Field) -> syn::Result<FieldMode> {
+    let Some(attr) = field.attrs.iter().find(|a| a.path().is_ident("decode")) else {
+        return Ok(FieldMode::Typed);
+    };
+
+    let mut mode = FieldMode::Typed;
+    attr.parse_nested_meta(|meta| {
+        if meta.path.is_ident("rest") {
+            mode = FieldMode::Rest;
+            return Ok(());
+        }
+        if meta.path.is_ident("len") {
+            let value = meta.value()?;
+            let lit: syn::LitStr = value.parse()?;
+            let ident = syn::Ident::new(&lit.value(), lit.span());
+            mode = FieldMode::Len(ident);
+            return Ok(());
+        }
+        Err(meta.error("expected `rest` or `len = \"field\"`"))
+    })?;
+    Ok(mode)
+}
+
+/// Generates the decode expression for one field.
+///
+/// Returns the expression and whether it still needs a `?`. `rest()` yields a
+/// plain slice, everything else yields a `Result`.
+fn field_decode(field: &syn::Field) -> syn::Result<(proc_macro2::TokenStream, bool)> {
+    Ok(match field_mode(field)? {
+        FieldMode::Typed => (decode_type(&field.ty), true),
+        FieldMode::Rest => (quote! { decoder.rest() }, false),
+        FieldMode::Len(name) => (quote! { decoder.read_len(#name as usize) }, true),
+    })
+}
+
 /// Process a struct's fields and generate the decode token stream.
 fn process_struct(data: &syn::Data) -> syn::Result<proc_macro2::TokenStream> {
     let struct_ = match data {
@@ -303,34 +349,46 @@ fn process_struct(data: &syn::Data) -> syn::Result<proc_macro2::TokenStream> {
 
     Ok(match &struct_.fields {
         Fields::Named(fields) => {
-            let iter = fields.named.iter().map(|field| {
+            let mut iter = Vec::new();
+            for field in &fields.named {
                 let name = field
                     .ident
                     .as_ref()
                     .expect("Struct field must have a name");
-                let type_ = &field.ty;
-                let match_ = decode_type(type_);
-                quote! {
-                    #name: #match_?,
-                }
-            });
+                let (expr, needs_try) = field_decode(field)?;
+                let expr = if needs_try {
+                    quote! { #expr? }
+                } else {
+                    expr
+                };
+                iter.push(quote! {
+                    #name: #expr,
+                });
+            }
             quote! { Self { #(#iter)* } }
         }
         Fields::Unit => quote! { Self },
         Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
             // Single unnamed field - decode it directly
-            let field = &fields.unnamed[0];
-            let type_ = &field.ty;
-            let match_ = decode_type(type_);
-            quote! { Self(#match_?) }
+            let (expr, needs_try) = field_decode(&fields.unnamed[0])?;
+            if needs_try {
+                quote! { Self(#expr?) }
+            } else {
+                quote! { Self(#expr) }
+            }
         }
         Fields::Unnamed(fields) => {
             // Multiple unnamed fields - decode each one in order
-            let iter = fields.unnamed.iter().map(|field| {
-                let type_ = &field.ty;
-                let match_ = decode_type(type_);
-                quote! { #match_?, }
-            });
+            let mut iter = Vec::new();
+            for field in &fields.unnamed {
+                let (expr, needs_try) = field_decode(field)?;
+                let expr = if needs_try {
+                    quote! { #expr? }
+                } else {
+                    expr
+                };
+                iter.push(quote! { #expr, });
+            }
             quote! { Self(#(#iter)*) }
         }
     })
