@@ -20,6 +20,12 @@ pub enum Error {
     #[error("Invalid UTF-8 string")]
     Utf8,
 
+    #[error("Length {0} exceeds the allowed limit")]
+    LenLimit(usize),
+
+    #[error("Invalid NBT: {0}")]
+    Nbt(&'static str),
+
     #[error("Unknown opcode: {0}")]
     UnknownOpcode(i32),
 }
