@@ -23,3 +23,7 @@ wip/
 *.log
 *.pcap
 *.pcapng
+
+# Saved wiki pages (local reference only)
+*.html
+*_files/

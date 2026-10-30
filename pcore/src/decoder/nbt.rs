@@ -33,7 +33,7 @@ impl<'a> Decoder<'a> {
     ///
     /// Network NBT has no root name: the payload starts with the type id.
     pub fn nbt(&mut self) -> Result<NbtTag<'a>, Error> {
-        let id = self.u8()?; // u8, not VarInt
+        let id = self.u8()?;
         self.nbt_parse(id, 0)
     }
 
@@ -42,6 +42,7 @@ impl<'a> Decoder<'a> {
     /// `decoder` is taken by mutable reference: `Decoder` is `Copy`, so passing
     /// it by value would advance a copy and leave the caller's cursor untouched.
     fn nbt_parse(&mut self, id: u8, depth: usize) -> Result<NbtTag<'a>, Error> {
+        println!("current id: {} depth: {} next 8 bytes: {:?}", id, depth, &self.get()[..self.get().len().min(8)]);
         if depth > MAX_DEPTH {
             return Err(Error::Nbt("nesting too deep"));
         }

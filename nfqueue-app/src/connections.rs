@@ -117,8 +117,11 @@ impl Connector {
                         // Malformed stream: stop parsing this direction. The
                         // bytes are still forwarded verbatim below.
                         Err(e) => {
-                            error!("[{:?}] parse error: {} got buffer: {:?} (could be not full, that's end part)", side, e, &buffer);
-                        },
+                            error!(
+                                "[{:?}] parse error: {} got buffer: {:?} (could be not full, that's end part)",
+                                side, e, &buffer
+                            );
+                        }
                     }
                 }
             }

@@ -3,7 +3,10 @@ pub mod parser;
 pub mod s2c;
 
 pub use parser::*;
-use pcore::{decoder::{Decoder, MAX_ELEMENTS}, errors::Error};
+use pcore::{
+    decoder::{Decoder, MAX_ELEMENTS},
+    errors::Error,
+};
 
 /// Reads an "Optional Byte Array": a VarInt length where `0` means absent.
 fn optional_bytes<'a>(decoder: &mut Decoder<'a>) -> Result<Option<&'a [u8]>, Error> {
