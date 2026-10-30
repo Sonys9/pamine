@@ -1,9 +1,4 @@
-//! Parser tests: framing, fragmentation and buffer bookkeeping.
-//!
-//! All packet enums are currently empty stubs, so a well-formed frame still
-//! fails with `UnknownOpcode`. These tests therefore assert on *framing*
-//! behaviour — how many bytes were consumed, whether a partial frame is
-//! reported as `Ok(None)` — rather than on decoded packet contents.
+//! Parser tests: framing, fragmentation and state transitions.
 
 use pcore::encoder::varint;
 
@@ -16,11 +11,59 @@ fn frame(body: &[u8]) -> Vec<u8> {
     out
 }
 
-/// A body with a single opcode byte. No packet enum has this opcode, so parsing
-/// reaches the dispatcher and fails with `UnknownOpcode` — which is exactly what
-/// we want: it proves the frame was split correctly.
-fn unknown_body() -> Vec<u8> {
-    vec![0x7f]
+/// A C2S handshake packet body (opcode + fields).
+fn handshake_body(next_state: i32) -> Vec<u8> {
+    let mut body = vec![0x00]; // opcode
+    body.extend_from_slice(&varint(760)); // protocol version
+    body.push(9); // address length
+    body.extend_from_slice(b"localhost");
+    body.extend_from_slice(&25565u16.to_be_bytes());
+    body.extend_from_slice(&varint(next_state));
+    body
+}
+
+#[test]
+fn parses_single_packet() {
+    let mut parser = Parser::new();
+    parser.update(Side::C2S, &frame(&handshake_body(2)));
+
+    let packet = parser.try_parse(Side::C2S).unwrap();
+    assert!(packet.is_some());
+    assert_eq!(parser.state(), State::Login);
+    assert!(parser.is_empty(Side::C2S));
+}
+
+#[test]
+fn parses_two_packets_from_one_read() {
+    let mut parser = Parser::new();
+    // Handshake with next_state=1 moves us to Status, where the state does
+    // not change again, so both following packets parse the same way.
+    parser.update(Side::C2S, &frame(&handshake_body(1)));
+    assert!(parser.try_parse(Side::C2S).unwrap().is_some());
+    parser.clear(Side::C2S);
+    assert_eq!(parser.state(), State::Status);
+
+    // Two Status Request packets (opcode 0x00, no fields) in one read.
+    let mut bytes = frame(&[0x00]);
+    bytes.extend_from_slice(&frame(&[0x00]));
+    parser.update(Side::C2S, &bytes);
+
+    assert!(parser.try_parse(Side::C2S).unwrap().is_some());
+    parser.clear(Side::C2S);
+    assert!(parser.try_parse(Side::C2S).unwrap().is_some());
+    parser.clear(Side::C2S);
+    assert!(parser.is_empty(Side::C2S));
+}
+
+#[test]
+fn incomplete_packet_returns_none() {
+    let mut parser = Parser::new();
+    let full = frame(&handshake_body(2));
+    parser.update(Side::C2S, &full[..full.len() - 1]);
+
+    assert!(parser.try_parse(Side::C2S).unwrap().is_none());
+    // Nothing was consumed, so the bytes are still there.
+    assert!(!parser.is_empty(Side::C2S));
 }
 
 #[test]
@@ -30,29 +73,16 @@ fn empty_buffer_returns_none() {
 }
 
 #[test]
-fn incomplete_packet_returns_none() {
-    let mut parser = Parser::new();
-    let full = frame(&unknown_body());
-    parser.update(Side::C2S, &full[..full.len() - 1]);
-
-    assert!(parser.try_parse(Side::C2S).unwrap().is_none());
-    // Nothing was consumed, so the bytes are still there.
-    assert!(!parser.is_empty(Side::C2S));
-}
-
-#[test]
 fn fragmented_packet_completes_after_second_read() {
     let mut parser = Parser::new();
-    let full = frame(&unknown_body());
-    let (a, b) = full.split_at(1);
+    let full = frame(&handshake_body(2));
+    let (a, b) = full.split_at(5);
 
     parser.update(Side::C2S, a);
     assert!(parser.try_parse(Side::C2S).unwrap().is_none());
 
     parser.update(Side::C2S, b);
-    // The frame is now complete, so parsing gets past framing and fails on the
-    // unknown opcode instead of reporting "need more data".
-    assert!(parser.try_parse(Side::C2S).is_err());
+    assert!(parser.try_parse(Side::C2S).unwrap().is_some());
 }
 
 #[test]
@@ -63,50 +93,21 @@ fn negative_length_is_an_error() {
 }
 
 #[test]
-fn frame_is_consumed_exactly_once() {
-    let mut parser = Parser::new();
-    // Two frames back to back.
-    let mut bytes = frame(&unknown_body());
-    bytes.extend_from_slice(&frame(&unknown_body()));
-    parser.update(Side::C2S, &bytes);
-
-    // First frame: framing succeeds, dispatch fails on the unknown opcode.
-    assert!(parser.try_parse(Side::C2S).is_err());
-    // The cursor advanced by exactly one frame, so the second one is still there.
-    assert!(!parser.is_empty(Side::C2S));
-
-    parser.clear(Side::C2S);
-    assert!(parser.try_parse(Side::C2S).is_err());
-    assert!(parser.is_empty(Side::C2S));
-}
-
-#[test]
-fn clear_compacts_the_buffer() {
-    let mut parser = Parser::new();
-    parser.update(Side::C2S, &frame(&unknown_body()));
-    let _ = parser.try_parse(Side::C2S);
-
-    parser.clear(Side::C2S);
-    assert!(parser.is_empty(Side::C2S));
-    assert!(parser.try_parse(Side::C2S).unwrap().is_none());
-}
-
-#[test]
 fn reset_restores_initial_state() {
     let mut parser = Parser::new();
-    parser.update(Side::C2S, &frame(&unknown_body()));
-    let _ = parser.try_parse(Side::C2S);
+    parser.update(Side::C2S, &frame(&handshake_body(2)));
+    parser.try_parse(Side::C2S).unwrap();
+    assert_eq!(parser.state(), State::Login);
 
     parser.reset();
     assert_eq!(parser.state(), State::Handshake);
     assert!(parser.is_empty(Side::C2S));
-    assert!(parser.try_parse(Side::C2S).unwrap().is_none());
 }
 
 #[test]
 fn sides_are_independent() {
     let mut parser = Parser::new();
-    parser.update(Side::C2S, &frame(&unknown_body()));
+    parser.update(Side::C2S, &frame(&handshake_body(2)));
 
     // Bytes on C2S must not be visible on S2C.
     assert!(parser.try_parse(Side::S2C).unwrap().is_none());
