@@ -1,7 +1,9 @@
-use pcore::Decode;
+//! Clientbound handshake packets.
+//!
+//! Stub: the protocol has no clientbound handshake packets, so this enum stays
+//! empty. It exists so the dispatch code has a uniform shape per state.
 
-#[derive(Clone, Debug)]
+use pcore_gen::DecodePacket;
+
+#[derive(DecodePacket, Clone, Debug)]
 pub enum Handshake {}
-
-#[derive(Decode, Debug, Clone)]
-pub struct HandshakeOk;

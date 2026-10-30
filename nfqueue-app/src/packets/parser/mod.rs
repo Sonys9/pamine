@@ -71,7 +71,7 @@ impl Parser {
     ///
     /// On success the read cursor advances by exactly one packet, so calling
     /// this in a loop drains every complete packet in the buffer.
-    pub fn try_parse<'a>(&'a mut self, side: Side) -> ParseResult<'a> {
+    pub fn try_parse(&mut self, side: Side) -> ParseResult {
         let threshold = self.threshold;
 
         // Borrow the three fields we need separately: the receive buffer
@@ -84,15 +84,15 @@ impl Parser {
         };
         // Touch the fields directly rather than through `StreamData::pending`:
         // a method call would borrow the whole struct, and we need `buffer`
-        // (shared, for `'a`) and `diff` (mutable) at the same time.
-        let pending: &'a [u8] = &stream.buffer.buffer[stream.diff..stream.buffer.len];
+        // (shared) and `diff` (mutable) at the same time.
+        let pending: &[u8] = &stream.buffer.buffer[stream.diff..stream.buffer.len];
 
         let Some(frame) = Frame::split(pending, threshold)? else {
             return Ok(None);
         };
         let consumed = frame.consumed;
 
-        let body: &'a [u8] = if frame.compressed {
+        let body: &[u8] = if frame.compressed {
             let scratch = &mut self.decompress_buffer;
             scratch.clear();
             let written = inflate(frame.body, scratch)?;
