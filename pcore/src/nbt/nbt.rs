@@ -20,12 +20,12 @@ pub enum NbtTag<'a> {
     Long(i64),
     Float(f32),
     Double(f64),
-    ByteArray(&'a [u8]),
-    String(&'a str),
+    ByteArray(&'a [u8]), // 4 byte len + slice
+    String(&'a str),     // 2 byte slice len + slice
     List(Vec<NbtTag<'a>>),
     Compound(Vec<(&'a str, NbtTag<'a>)>), // Not hashmap because we dont need hashing
-    IntArray(Vec<i32>),
-    LongArray(Vec<i64>),
+    IntArray(Vec<i32>),                   // 4 byte len + owned (big-endian, unaligned)
+    LongArray(Vec<i64>),                  // 4 byte len + owned (big-endian, unaligned)
 }
 
 impl<'a> NbtTag<'a> {
@@ -90,26 +90,26 @@ impl<'a> NbtTag<'a> {
                 }
                 Self::Compound(compound)
             }
-            11 => {
-                let len = Self::len(decoder)?;
-                let mut numbers: Vec<i32> = Vec::with_capacity(len);
-                for _ in 0..len {
-                    numbers.push(decoder.i32()?);
-                }
-                // Cannot borrow as &[i32]: the wire is big-endian and the pointer
-                // is not guaranteed to be aligned.
-                Self::IntArray(numbers)
-            }
-            12 => {
-                let len = Self::len(decoder)?;
-                let mut numbers: Vec<i64> = Vec::with_capacity(len);
-                for _ in 0..len {
-                    numbers.push(decoder.i64()?);
-                }
-                Self::LongArray(numbers)
-            }
+            // Cannot borrow as &[i32] / &[i64]: the wire is big-endian and the
+            // pointer is not guaranteed to be aligned, so the elements have to
+            // be decoded one by one.
+            11 => Self::IntArray(Self::array(decoder, Decoder::i32)?),
+            12 => Self::LongArray(Self::array(decoder, Decoder::i64)?),
             _ => return Err(Error::Nbt("unknown tag type")),
         })
+    }
+
+    /// Reads a length-prefixed array, decoding each element with `read`.
+    fn array<T>(
+        decoder: &mut Decoder<'a>,
+        read: fn(&mut Decoder<'a>) -> Result<T, Error>,
+    ) -> Result<Vec<T>, Error> {
+        let len = Self::len(decoder)?;
+        let mut out = Vec::with_capacity(len);
+        for _ in 0..len {
+            out.push(read(decoder)?);
+        }
+        Ok(out)
     }
 
     /// Reads an `i32` big-endian length and validates it against [`MAX_ELEMENTS`].
