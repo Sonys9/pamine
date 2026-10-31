@@ -1,8 +1,9 @@
 //! Parser tests: framing, fragmentation and state transitions.
 
-use pcore::encoder::varint;
+use pcore::{encode, encoder::varint};
 
 use super::{Parser, Side, State, frame::Frame, frame::inflate, frame_packet};
+use crate::packets::c2s::play::{ChatMessage, Play};
 
 /// Builds an uncompressed frame: `len:VarInt body`.
 fn frame(body: &[u8]) -> Vec<u8> {
@@ -159,5 +160,66 @@ fn frame_packet_round_trips_through_the_parser() {
 
     assert!(parser.try_parse(Side::C2S).unwrap().is_some());
     assert_eq!(parser.state(), State::Login);
+    assert!(parser.is_empty(Side::C2S));
+}
+
+/// A `Chat Message` body with no signature and no last-seen entries.
+fn chat_message(text: &str) -> ChatMessage<'_> {
+    ChatMessage {
+        message: text,
+        timestamp: 1,
+        salt: 2,
+        signature: None,
+        signed_preview: false,
+        last_seen_messages: Vec::new(),
+        last_received: None,
+    }
+}
+
+#[test]
+fn encoding_the_enum_writes_the_opcode_from_the_id_attribute() {
+    // The whole point of encoding `Play` instead of `ChatMessage`: the opcode
+    // comes from `#[id(0x05)]` and is never spelled out by hand.
+    let packet = Play::ChatMessage(chat_message("hi"));
+    assert_eq!(packet.opcode(), 0x05);
+
+    let bytes = encode(&packet);
+    assert_eq!(bytes[0], 0x05, "opcode must be the first byte");
+}
+
+#[test]
+fn spoofed_chat_message_survives_a_full_parse_round_trip() {
+    // Reproduces the injection path: build the enum, encode it, frame it, then
+    // feed the frame back through the parser. Before the fix the body was sent
+    // without an opcode or a length prefix and the peer dropped the connection.
+    let packet = Play::ChatMessage(chat_message("!dlrow ,olleH"));
+    let body = encode(&packet);
+    let framed = frame_packet(&body, None).unwrap();
+
+    let mut parser = Parser::new();
+    // Skip the handshake: jump straight to Play by parsing a handshake first.
+    parser.update(Side::C2S, &frame(&handshake_body(2)));
+    parser.try_parse(Side::C2S).unwrap();
+    parser.clear(Side::C2S);
+    assert_eq!(parser.state(), State::Login);
+
+    // `Login Success` is S2C, so drive the state machine from that side.
+    let mut login_success = vec![0x02]; // opcode
+    login_success.extend_from_slice(&[0u8; 16]); // uuid
+    login_success.extend_from_slice(&[0]); // empty name
+    login_success.extend_from_slice(&[0]); // no properties
+    parser.update(Side::S2C, &frame(&login_success));
+    parser.try_parse(Side::S2C).unwrap();
+    parser.clear(Side::S2C);
+    assert_eq!(parser.state(), State::Play);
+
+    parser.update(Side::C2S, &framed);
+    let parsed = parser.try_parse(Side::C2S).unwrap().expect("packet");
+    match parsed {
+        super::Packet::C2S(crate::packets::c2s::packets::C2SPacket::Play(Play::ChatMessage(m))) => {
+            assert_eq!(m.message, "!dlrow ,olleH");
+        }
+        other => panic!("unexpected packet: {other:?}"),
+    }
     assert!(parser.is_empty(Side::C2S));
 }

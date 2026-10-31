@@ -35,7 +35,6 @@ pub use state::Packet;
 use pcore::decoder::Decoder;
 
 use frame::{Frame, inflate};
-use tracing::info;
 
 pub struct Parser {
     state: State,

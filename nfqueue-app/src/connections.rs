@@ -2,7 +2,7 @@ use std::{
     borrow::Cow, net::SocketAddr, os::fd::{AsRawFd, FromRawFd}, sync::Arc, time::Duration,
 };
 
-use pcore::{Encode, encoder::Encoder};
+use pcore::encode;
 use socket2::{Domain, SockAddr, Type};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt}, net::{
@@ -166,11 +166,12 @@ fn on_message(mut message: ChatMessage<'_>) -> Option<Vec<u8>> {
         message.message = "!dlrow ,olleH";
         info!("After: {:?}", message);
 
-        // The opcode is not part of `ChatMessage`, so it is written by hand.
-        let mut encoder = Encoder::with_capacity(64);
-        encoder.varint(0x05); // Chat Message
-        message.encode(&mut encoder);
-        return Some(encoder.into_bytes());
+        // Wrap the body back into the enum and encode *that*: `EncodePacket`
+        // writes the opcode from `#[id(0x05)]`, so it is never spelled out by
+        // hand and cannot drift from the table.
+        let packet = c2s::play::Play::ChatMessage(message);
+        debug_assert_eq!(packet.opcode(), 0x05, "Chat Message opcode");
+        return Some(encode(&packet));
     };
     None
 }
