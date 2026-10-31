@@ -7,7 +7,7 @@ use tokio::{
     net::tcp::{OwnedReadHalf, OwnedWriteHalf},
     sync::{Mutex, MutexGuard},
 };
-use tracing::{error, info};
+use tracing::error;
 
 use crate::packets::{Parser, Side};
 

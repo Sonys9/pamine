@@ -96,7 +96,10 @@ impl Parser {
         let body: &'a [u8] = if frame.compressed {
             let scratch = &mut self.decompress_buffer;
             scratch.clear();
-            let written = inflate(frame.body, scratch)?;
+            // `data_len` was already bounded by `Frame::split`, so this cannot
+            // reserve more than `MAX_PACKET_LEN` up front.
+            scratch.reserve(frame.data_len);
+            let written = inflate(frame.body, scratch, frame.data_len)?;
             &scratch[..written]
         } else {
             frame.body

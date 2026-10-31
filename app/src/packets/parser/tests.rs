@@ -2,7 +2,11 @@
 
 use pcore::{Decode, encode, encoder::varint};
 
-use super::{Parser, Side, State, frame::Frame, frame::inflate, frame_packet};
+use super::{
+    Parser, Side, State,
+    frame::{Frame, MAX_PACKET_LEN, deflate, inflate},
+    frame_packet,
+};
 use crate::packets::c2s::play::{ChatCommand, ChatMessage, Play};
 
 /// Builds an uncompressed frame: `len:VarInt body`.
@@ -144,11 +148,119 @@ fn frame_packet_above_threshold_compresses_and_round_trips() {
     let split = Frame::split(&framed, Some(256)).unwrap().unwrap();
     assert!(split.compressed);
     assert_eq!(split.consumed, framed.len());
+    assert_eq!(split.data_len, body.len(), "data_len must be the raw size");
 
     let mut out = Vec::new();
-    let written = inflate(split.body, &mut out).unwrap();
+    let written = inflate(split.body, &mut out, split.data_len).unwrap();
     assert_eq!(written, body.len());
     assert_eq!(out, body);
+}
+
+#[test]
+fn inflate_rejects_a_stream_larger_than_data_len() {
+    // A zlib bomb: 64 KiB of zeros compresses to a few hundred bytes. If the
+    // header claims 16 bytes, the decompressor must stop instead of expanding
+    // the whole thing.
+    let bomb = vec![0u8; 64 * 1024];
+    let compressed = deflate(&bomb).unwrap();
+
+    let mut out = Vec::new();
+    let err = inflate(&compressed, &mut out, 16).unwrap_err();
+    assert!(
+        err.to_string().contains("data_len declared 16"),
+        "unexpected error: {err}"
+    );
+    // The cap is `expected + 1`, so at most 17 bytes were written.
+    assert!(out.len() <= 17, "wrote {} bytes", out.len());
+}
+
+#[test]
+fn inflate_stops_a_bomb_that_claims_a_tiny_size() {
+    // The attack: a frame declares `data_len = 1000` but the zlib stream
+    // expands to 8 MiB. Without the cap, `read_to_end` would allocate all 8 MiB
+    // (and a real bomb could claim gigabytes). With it, the reader stops at
+    // 1001 bytes and the mismatch is reported.
+    let bomb = vec![0u8; 8 * 1024 * 1024];
+    let compressed = deflate(&bomb).unwrap();
+    assert!(
+        compressed.len() < 16 * 1024,
+        "the bomb should be small on the wire, got {} bytes",
+        compressed.len()
+    );
+
+    let mut out = Vec::new();
+    let err = inflate(&compressed, &mut out, 1000).unwrap_err();
+    assert!(
+        err.to_string().contains("data_len declared 1000"),
+        "unexpected error: {err}"
+    );
+
+    // The whole point: memory stayed bounded by the declared size, not by the
+    // 8 MiB the stream actually contains.
+    assert!(out.len() <= 1001, "wrote {} bytes", out.len());
+    assert!(
+        out.capacity() <= 4096,
+        "allocated {} bytes for a 1000-byte claim",
+        out.capacity()
+    );
+}
+
+#[test]
+fn inflate_accepts_a_stream_that_matches_data_len() {
+    // The happy path must still work: an honest header is not rejected.
+    let body = vec![0xABu8; 4096];
+    let compressed = deflate(&body).unwrap();
+
+    let mut out = Vec::new();
+    let written = inflate(&compressed, &mut out, body.len()).unwrap();
+    assert_eq!(written, body.len());
+    assert_eq!(out, body);
+}
+
+#[test]
+fn inflate_rejects_a_stream_shorter_than_data_len() {
+    let body = b"hello";
+    let compressed = deflate(body).unwrap();
+
+    let mut out = Vec::new();
+    let err = inflate(&compressed, &mut out, 100).unwrap_err();
+    assert!(
+        err.to_string().contains("data_len declared 100"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn split_rejects_an_oversized_frame_length() {
+    // A length prefix above the limit must fail before the bytes arrive.
+    let mut framed = varint((MAX_PACKET_LEN + 1) as i32);
+    framed.push(0x00);
+    let err = match Frame::split(&framed, None) {
+        Err(e) => e,
+        Ok(_) => panic!("oversized frame length was accepted"),
+    };
+    assert!(
+        err.to_string().contains("exceeds the"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn split_rejects_an_oversized_data_len() {
+    // `len` is small, but the declared uncompressed size is not.
+    let mut inner = varint((MAX_PACKET_LEN + 1) as i32);
+    inner.extend_from_slice(&[0x00; 4]);
+    let mut framed = varint(inner.len() as i32);
+    framed.extend_from_slice(&inner);
+
+    let err = match Frame::split(&framed, Some(256)) {
+        Err(e) => e,
+        Ok(_) => panic!("oversized data_len was accepted"),
+    };
+    assert!(
+        err.to_string().contains("data_len"),
+        "unexpected error: {err}"
+    );
 }
 
 #[test]

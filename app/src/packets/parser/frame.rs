@@ -16,12 +16,27 @@ use pcore::{
     encoder::{packet_frame, write_varint},
 };
 
+/// Largest packet body the protocol allows, compressed or not.
+///
+/// Vanilla 1.19.2 never sends a body above 2 MiB, and the receive buffer is
+/// sized to match. Anything larger is either a bug or a zlib bomb, so it is
+/// rejected before a single byte is decompressed.
+pub const MAX_PACKET_LEN: usize = 2 * 1024 * 1024;
+
 /// One framed packet, still pointing into the receive buffer.
 pub struct Frame<'a> {
     /// Packet body, positioned at the opcode.
     pub body: &'a [u8],
     /// Whether `body` still needs zlib decompression.
     pub compressed: bool,
+    /// Uncompressed size declared by the `data_len` header, or `0` when the
+    /// frame is not compressed.
+    ///
+    /// This is the size the peer promises the body will have after inflating.
+    /// It is validated against [`MAX_PACKET_LEN`] in [`Frame::split`] and
+    /// against the actual output in [`inflate`], so a lying header cannot make
+    /// the decompressor allocate more than it declared.
+    pub data_len: usize,
     /// Total bytes this frame occupies in the receive buffer, length prefix
     /// included. This is what the read cursor must advance by.
     pub consumed: usize,
@@ -41,6 +56,11 @@ impl<'a> Frame<'a> {
             eyre::bail!("negative packet length: {len}");
         }
         let len = len as usize;
+        // Reject an oversized frame before waiting for its bytes: otherwise a
+        // peer could make us buffer up to `len` bytes just to fail later.
+        if len > MAX_PACKET_LEN {
+            eyre::bail!("packet length {len} exceeds the {MAX_PACKET_LEN} byte limit");
+        }
         let prefix_len = head.len();
         let total = len
             .checked_add(prefix_len)
@@ -56,6 +76,7 @@ impl<'a> Frame<'a> {
             return Ok(Some(Self {
                 body,
                 compressed: false,
+                data_len: 0,
                 consumed: total,
             }));
         };
@@ -68,21 +89,40 @@ impl<'a> Frame<'a> {
             return Ok(Some(Self {
                 body: inner.get(),
                 compressed: false,
+                data_len: 0,
                 consumed: total,
             }));
+        }
+        let data_len = data_len as usize;
+        // The declared size is what the decompressor will be allowed to write,
+        // so it has to be bounded before `inflate` runs. A zlib stream can
+        // expand ~1000:1, so a 2 MiB frame could otherwise claim gigabytes.
+        if data_len > MAX_PACKET_LEN {
+            eyre::bail!("declared data_len {data_len} exceeds the {MAX_PACKET_LEN} byte limit");
         }
         Ok(Some(Self {
             body: inner.get(),
             compressed: true,
+            data_len,
             consumed: total,
         }))
     }
 }
 
 /// Decompresses `payload` into `out`, returning the number of bytes written.
-pub fn inflate(payload: &[u8], out: &mut Vec<u8>) -> eyre::Result<usize> {
-    let mut decoder = ZlibDecoder::new(payload);
-    Ok(decoder.read_to_end(out)?)
+///
+/// `expected` is the `data_len` the peer declared. The reader is capped at
+/// `expected + 1` bytes, so a stream that expands past its own header is
+/// stopped immediately instead of filling memory, and the size is then checked
+/// for an exact match. A mismatch means the header lied, which is a protocol
+/// violation rather than something to paper over.
+pub fn inflate(payload: &[u8], out: &mut Vec<u8>, expected: usize) -> eyre::Result<usize> {
+    let mut decoder = ZlibDecoder::new(payload).take(expected as u64 + 1);
+    let written = decoder.read_to_end(out)?;
+    if written != expected {
+        eyre::bail!("decompressed {written} bytes, but data_len declared {expected}");
+    }
+    Ok(written)
 }
 
 /// Compresses `payload` with zlib.
