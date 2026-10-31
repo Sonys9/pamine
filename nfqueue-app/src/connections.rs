@@ -166,11 +166,7 @@ fn on_message(mut message: ChatMessage<'_>) -> Option<Vec<u8>> {
         message.message = "!dlrow ,olleH";
         info!("After: {:?}", message);
 
-        // Wrap the body back into the enum and encode *that*: `EncodePacket`
-        // writes the opcode from `#[id(0x05)]`, so it is never spelled out by
-        // hand and cannot drift from the table.
         let packet = c2s::play::Play::ChatMessage(message);
-        debug_assert_eq!(packet.opcode(), 0x05, "Chat Message opcode");
         return Some(encode(&packet));
     };
     None

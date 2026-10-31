@@ -261,6 +261,34 @@ fn packet_enum_writes_opcode_first() {
 }
 
 #[test]
+fn packet_enum_exposes_its_opcode() {
+    // `opcode()` must agree with the `#[id(N)]` attribute for every variant
+    // shape: tuple, unit and struct.
+    assert_eq!(Packet::Simple(0).opcode(), 0x00);
+    assert_eq!(Packet::Empty.opcode(), 0x01);
+    assert_eq!(Packet::Struct { x: 0, y: 0 }.opcode(), 0x02);
+}
+
+#[test]
+fn opcode_matches_the_first_encoded_varint() {
+    // The whole point of `opcode()` is that it is the same value `Encode`
+    // writes, so a caller can build a frame without hard-coding the id.
+    for value in [
+        Packet::Simple(-7),
+        Packet::Empty,
+        Packet::Struct { x: 1, y: -2 },
+    ] {
+        let mut encoder = Encoder::new();
+        value.encode(&mut encoder);
+        let bytes = encoder.into_bytes();
+
+        let mut decoder = Decoder::new(&bytes);
+        let written = decoder.varint().unwrap().get();
+        assert_eq!(written, value.opcode(), "opcode() disagrees with Encode");
+    }
+}
+
+#[test]
 fn encode_matches_known_wire_bytes() {
     // A hand-checked fixture: VarInt 300, string "hi", bool true.
     #[derive(Encode)]

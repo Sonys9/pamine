@@ -20,6 +20,8 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     };
 
     let mut match_arms = Vec::new();
+    // `Self::Variant(..) => 0x05` arms for the generated `opcode()` method.
+    let mut opcode_arms = Vec::new();
     let mut seen: HashMap<String, String> = HashMap::new();
 
     for variant in &data_enum.variants {
@@ -36,6 +38,7 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
                         ::pcore::Encode::encode(inner, encoder);
                     }
                 });
+                opcode_arms.push(quote! { Self::#variant_name(..) => #opcode, });
             }
             Fields::Unit => {
                 match_arms.push(quote! {
@@ -43,6 +46,7 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
                         encoder.varint(#opcode);
                     }
                 });
+                opcode_arms.push(quote! { Self::#variant_name => #opcode, });
             }
             Fields::Named(named) => {
                 let names: Vec<_> = named
@@ -56,6 +60,7 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
                         #(::pcore::Encode::encode(#names, encoder);)*
                     }
                 });
+                opcode_arms.push(quote! { Self::#variant_name { .. } => #opcode, });
             }
             Fields::Unnamed(_) => unreachable!("check_single_unnamed rejects this"),
         }
@@ -68,6 +73,19 @@ pub fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
             fn encode(&self, encoder: &mut ::pcore::encoder::Encoder) {
                 match self {
                     #(#match_arms)*
+                }
+            }
+        }
+
+        impl #impl_generics #name #ty_generics #where_clause {
+            /// The wire opcode of this variant, taken from its `#[id(N)]`.
+            ///
+            /// [`Encode`](::pcore::Encode) already writes this value as the
+            /// first VarInt of the packet; this method exposes it for logging,
+            /// filtering and building frames by hand.
+            pub fn opcode(&self) -> i32 {
+                match self {
+                    #(#opcode_arms)*
                 }
             }
         }
