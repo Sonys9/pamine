@@ -1,13 +1,14 @@
 //! Clientbound login packets (protocol 760 / 1.19.2).
 
 use pcore::{
-    Decode,
+    Decode, Encode,
     decoder::{Decoder, MAX_ELEMENTS, Uuid, VarInt},
+    encoder::Encoder,
     errors::Error,
 };
-use pcore_gen::DecodePacket;
+use pcore_gen::{DecodePacket, EncodePacket};
 
-#[derive(DecodePacket, Clone, Debug)]
+#[derive(DecodePacket, EncodePacket, Clone, Debug)]
 pub enum Login<'a> {
     #[id(0x00)]
     Disconnect(Disconnect<'a>),
@@ -21,12 +22,12 @@ pub enum Login<'a> {
     LoginPluginRequest(LoginPluginRequest<'a>),
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct Disconnect<'a> {
     pub reason: &'a str,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct EncryptionRequest<'a> {
     pub server_id: &'a str,
     pub public_key: &'a [u8],
@@ -62,6 +63,20 @@ impl<'a> Decode<'a> for Property<'a> {
     }
 }
 
+impl Encode for Property<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.string(self.name);
+        encoder.string(self.value);
+        match self.signature {
+            Some(signature) => {
+                encoder.bool(true);
+                encoder.string(signature);
+            }
+            None => encoder.bool(false),
+        }
+    }
+}
+
 /// The `Property` array of `Login Success`.
 ///
 /// Kept as its own type so the count and the elements are read in one place,
@@ -91,6 +106,15 @@ impl<'a> Decode<'a> for Properties<'a> {
     }
 }
 
+impl Encode for Properties<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.varint(self.entries.len() as i32);
+        for entry in &self.entries {
+            entry.encode(encoder);
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct LoginSuccess<'a> {
     pub uuid: Uuid,
@@ -111,7 +135,15 @@ impl<'a> Decode<'a> for LoginSuccess<'a> {
     }
 }
 
-#[derive(Decode, Debug, Clone)]
+impl Encode for LoginSuccess<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.uuid(&self.uuid);
+        encoder.string(self.username);
+        self.properties.encode(encoder);
+    }
+}
+
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct SetCompression {
     pub threshold: VarInt,
 }
@@ -120,7 +152,7 @@ pub struct SetCompression {
 ///
 /// The payload has no length prefix: the wiki states its length "must be
 /// inferred from the packet length", so it is read as the rest of the buffer.
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct LoginPluginRequest<'a> {
     pub message_id: VarInt,
     pub channel: &'a str,

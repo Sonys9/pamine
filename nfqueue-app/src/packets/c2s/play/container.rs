@@ -1,12 +1,13 @@
 //! Container clicks and creative-mode slot edits.
 
 use pcore::{
-    Decode,
+    Decode, Encode,
     decoder::{Decoder, Slot, VarInt},
+    encoder::Encoder,
     errors::Error,
 };
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct ClickContainerButton {
     pub window_id: i8,
     pub button_id: i8,
@@ -57,12 +58,29 @@ impl<'a> Decode<'a> for ClickContainer<'a> {
     }
 }
 
-#[derive(Decode, Debug, Clone)]
+impl Encode for ClickContainer<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.u8(self.window_id);
+        encoder.varint(self.state_id.get());
+        encoder.i16(self.slot);
+        encoder.i8(self.button);
+        encoder.varint(self.mode.get());
+        // Each entry is a bare i16 followed by a Slot.
+        encoder.varint(self.changed_slots.len() as i32);
+        for (index, slot) in &self.changed_slots {
+            encoder.i16(*index);
+            encoder.slot(slot);
+        }
+        encoder.slot(&self.carried_item);
+    }
+}
+
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct CloseContainer {
     pub window_id: u8,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct SetCreativeModeSlot<'a> {
     pub slot: i16,
     /// A single Slot: `bool present + VarInt id + i8 count + NBT`.

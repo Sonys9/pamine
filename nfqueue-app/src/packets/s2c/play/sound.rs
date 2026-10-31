@@ -1,12 +1,13 @@
 //! Sound effects.
 
 use pcore::{
-    Decode,
+    Decode, Encode,
     decoder::{Decoder, VarInt},
+    encoder::Encoder,
     errors::Error,
 };
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct CustomSoundEffect<'a> {
     pub sound_name: &'a str,
     pub sound_category: VarInt,
@@ -19,7 +20,7 @@ pub struct CustomSoundEffect<'a> {
 }
 
 /// `Entity Sound Effect` (0x5F). Unlike [`SoundEffect`] it carries no seed.
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct EntitySoundEffect {
     pub sound_id: VarInt,
     pub sound_category: VarInt,
@@ -28,7 +29,7 @@ pub struct EntitySoundEffect {
     pub pitch: f32,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct SoundEffect {
     pub sound_id: VarInt,
     pub sound_category: VarInt,
@@ -72,5 +73,20 @@ impl<'a> Decode<'a> for StopSound<'a> {
             source,
             sound,
         })
+    }
+}
+
+impl Encode for StopSound<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        const SOURCE: u8 = 0x01;
+        const SOUND: u8 = 0x02;
+
+        encoder.u8(self.flags);
+        if self.flags & SOURCE != 0 {
+            encoder.varint(self.source.map(|s| s.get()).unwrap_or(0));
+        }
+        if self.flags & SOUND != 0 {
+            encoder.string(self.sound.unwrap_or(""));
+        }
     }
 }

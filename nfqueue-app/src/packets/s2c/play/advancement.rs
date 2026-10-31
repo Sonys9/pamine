@@ -1,8 +1,9 @@
 //! Advancements, recipes and tags.
 
 use pcore::{
-    Decode,
+    Decode, Encode,
     decoder::{Decoder, Slot, VarInt},
+    encoder::Encoder,
     errors::Error,
 };
 
@@ -135,6 +136,84 @@ impl<'a> Decode<'a> for UpdateAdvancements<'a> {
     }
 }
 
+impl Encode for AdvancementDisplay<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.string(self.title);
+        encoder.string(self.description);
+        encoder.slot(&self.icon);
+        encoder.varint(self.frame_type.get());
+        encoder.i32(self.flags);
+        if self.flags & 0x01 != 0 {
+            encoder.string(self.background_texture.unwrap_or(""));
+        }
+        encoder.f32(self.x_coord);
+        encoder.f32(self.y_coord);
+    }
+}
+
+impl Encode for AdvancementProgress<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.string(self.id);
+        match self.parent_id {
+            Some(parent) => {
+                encoder.bool(true);
+                encoder.string(parent);
+            }
+            None => encoder.bool(false),
+        }
+        match &self.display {
+            Some(display) => {
+                encoder.bool(true);
+                display.encode(encoder);
+            }
+            None => encoder.bool(false),
+        }
+        encoder.encode(&self.criteria);
+        encoder.varint(self.requirements.len() as i32);
+        for group in &self.requirements {
+            encoder.encode(group);
+        }
+    }
+}
+
+impl Encode for CriterionProgress<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.string(self.id);
+        match self.achieved_at {
+            Some(at) => {
+                encoder.bool(true);
+                encoder.i64(at);
+            }
+            None => encoder.bool(false),
+        }
+    }
+}
+
+impl Encode for AdvancementProgressUpdate<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.string(self.id);
+        encoder.varint(self.criteria.len() as i32);
+        for criterion in &self.criteria {
+            criterion.encode(encoder);
+        }
+    }
+}
+
+impl Encode for UpdateAdvancements<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.bool(self.reset);
+        encoder.varint(self.added.len() as i32);
+        for advancement in &self.added {
+            advancement.encode(encoder);
+        }
+        encoder.encode(&self.removed);
+        encoder.varint(self.progress.len() as i32);
+        for update in &self.progress {
+            update.encode(encoder);
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SelectAdvancementsTab<'a> {
     pub has_id: bool,
@@ -153,6 +232,15 @@ impl<'a> Decode<'a> for SelectAdvancementsTab<'a> {
     }
 }
 
+impl Encode for SelectAdvancementsTab<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.bool(self.has_id);
+        if self.has_id {
+            encoder.string(self.tab_id.unwrap_or(""));
+        }
+    }
+}
+
 /// One ingredient of a recipe: any of `items` may be used.
 #[derive(Debug, Clone)]
 pub struct Ingredient<'a> {
@@ -163,6 +251,15 @@ impl<'a> Decode<'a> for Ingredient<'a> {
     fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
         let items = counted(decoder, |d| Slot::decode(d))?;
         Ok(Self { items })
+    }
+}
+
+impl Encode for Ingredient<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.varint(self.items.len() as i32);
+        for item in &self.items {
+            encoder.slot(item);
+        }
     }
 }
 
@@ -236,6 +333,90 @@ impl<'a> Decode<'a> for UpdateRecipes<'a> {
             Ok(Recipe { kind, id, data })
         })?;
         Ok(Self { recipes })
+    }
+}
+
+impl Encode for RecipeData<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        match self {
+            Self::Shapeless {
+                group,
+                ingredients,
+                result,
+            } => {
+                encoder.string(group);
+                encoder.varint(ingredients.len() as i32);
+                for ingredient in ingredients {
+                    ingredient.encode(encoder);
+                }
+                encoder.slot(result);
+            }
+            Self::Shaped {
+                width,
+                height,
+                group,
+                ingredients,
+                result,
+            } => {
+                encoder.varint(width.get());
+                encoder.varint(height.get());
+                encoder.string(group);
+                // The grid is `width * height` entries, not a counted array.
+                for ingredient in ingredients {
+                    ingredient.encode(encoder);
+                }
+                encoder.slot(result);
+            }
+            Self::Cooking {
+                group,
+                ingredient,
+                result,
+                experience,
+                cooking_time,
+            } => {
+                encoder.string(group);
+                ingredient.encode(encoder);
+                encoder.slot(result);
+                encoder.f32(*experience);
+                encoder.varint(cooking_time.get());
+            }
+            Self::Stonecutting {
+                group,
+                ingredient,
+                result,
+            } => {
+                encoder.string(group);
+                ingredient.encode(encoder);
+                encoder.slot(result);
+            }
+            Self::Smithing {
+                base,
+                addition,
+                result,
+            } => {
+                base.encode(encoder);
+                addition.encode(encoder);
+                encoder.slot(result);
+            }
+            Self::Special => {}
+        }
+    }
+}
+
+impl Encode for Recipe<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.string(self.kind);
+        encoder.string(self.id);
+        self.data.encode(encoder);
+    }
+}
+
+impl Encode for UpdateRecipes<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.varint(self.recipes.len() as i32);
+        for recipe in &self.recipes {
+            recipe.encode(encoder);
+        }
     }
 }
 
@@ -330,5 +511,31 @@ impl<'a> Decode<'a> for UpdateTags<'a> {
             })
         })?;
         Ok(Self { registries })
+    }
+}
+
+impl Encode for TagGroup<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.string(self.name);
+        encoder.encode(&self.entries);
+    }
+}
+
+impl Encode for TagRegistry<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.string(self.registry);
+        encoder.varint(self.tags.len() as i32);
+        for tag in &self.tags {
+            tag.encode(encoder);
+        }
+    }
+}
+
+impl Encode for UpdateTags<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.varint(self.registries.len() as i32);
+        for registry in &self.registries {
+            registry.encode(encoder);
+        }
     }
 }

@@ -1,12 +1,13 @@
 //! Entity interaction, recipes, advancements and trade selection.
 
 use pcore::{
-    Decode,
+    Decode, Encode,
     decoder::{Decoder, Uuid, VarInt},
+    encoder::Encoder,
     errors::Error,
 };
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct QueryEntityTag {
     pub transaction_id: VarInt,
     pub entity_id: VarInt,
@@ -66,41 +67,62 @@ impl<'a> Decode<'a> for Interact {
     }
 }
 
-#[derive(Decode, Debug, Clone)]
+impl Encode for Interact {
+    fn encode(&self, encoder: &mut Encoder) {
+        const INTERACT: i32 = 0;
+        const INTERACT_AT: i32 = 2;
+
+        encoder.varint(self.entity_id.get());
+        encoder.varint(self.kind.get());
+        let kind_id = self.kind.get();
+
+        if kind_id == INTERACT_AT {
+            encoder.f32(self.target_x.unwrap_or(0.0));
+            encoder.f32(self.target_y.unwrap_or(0.0));
+            encoder.f32(self.target_z.unwrap_or(0.0));
+        }
+        if kind_id == INTERACT || kind_id == INTERACT_AT {
+            encoder.varint(self.hand.map(|h| h.get()).unwrap_or(0));
+        }
+        encoder.bool(self.sneaking);
+    }
+}
+
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct SwingArm {
     pub hand: VarInt,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct TeleportToEntity {
     pub target: Uuid,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct PickItem {
     pub slot: VarInt,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct PlaceRecipe<'a> {
     pub window_id: i8,
     pub recipe: &'a str,
     pub make_all: bool,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct ChangeRecipeBookSettings {
     pub book_id: VarInt,
     pub book_open: bool,
     pub filter_active: bool,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct SetSeenRecipe<'a> {
     pub recipe_id: &'a str,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct RenameItem<'a> {
     pub item_name: &'a str,
 }
@@ -128,7 +150,16 @@ impl<'a> Decode<'a> for SeenAdvancements<'a> {
     }
 }
 
-#[derive(Decode, Debug, Clone)]
+impl Encode for SeenAdvancements<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.varint(self.action.get());
+        if self.action.get() == 0 {
+            encoder.string(self.tab_id.unwrap_or(""));
+        }
+    }
+}
+
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct SelectTrade {
     pub selected_slot: VarInt,
 }
@@ -168,7 +199,20 @@ impl<'a> Decode<'a> for SetBeaconEffect {
     }
 }
 
-#[derive(Decode, Debug, Clone)]
+impl Encode for SetBeaconEffect {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.bool(self.has_primary_effect);
+        if self.has_primary_effect {
+            encoder.varint(self.primary_effect.map(|e| e.get()).unwrap_or(0));
+        }
+        encoder.bool(self.has_secondary_effect);
+        if self.has_secondary_effect {
+            encoder.varint(self.secondary_effect.map(|e| e.get()).unwrap_or(0));
+        }
+    }
+}
+
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct SetHeldItem {
     pub slot: i16,
 }

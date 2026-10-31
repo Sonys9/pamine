@@ -1,12 +1,13 @@
 //! Packets that do not fit a larger subject group.
 
 use pcore::{
-    Decode,
+    Decode, Encode,
     decoder::{Decoder, NbtTag, VarInt},
+    encoder::Encoder,
     errors::Error,
 };
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct PluginMessage<'a> {
     pub channel: &'a str,
     /// Everything after the channel: the payload has no length prefix, its
@@ -16,12 +17,12 @@ pub struct PluginMessage<'a> {
     pub data: &'a [u8],
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct Ping {
     pub id: i32,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct KeepAlive {
     pub keep_alive_id: i64,
 }
@@ -68,6 +69,21 @@ impl<'a> Decode<'a> for ServerData<'a> {
     }
 }
 
+impl Encode for ServerData<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.bool(self.has_motd);
+        if self.has_motd {
+            encoder.string(self.motd.unwrap_or(""));
+        }
+        encoder.bool(self.has_icon);
+        if self.has_icon {
+            encoder.string(self.icon.unwrap_or(""));
+        }
+        encoder.bool(self.previews_chat);
+        encoder.bool(self.enforces_secure_chat);
+    }
+}
+
 /// `Resource Pack` (0x3D).
 ///
 /// Hand-written `Decode`: `prompt_message` is gated by `has_prompt_message`.
@@ -102,7 +118,19 @@ impl<'a> Decode<'a> for ResourcePack<'a> {
     }
 }
 
-#[derive(Decode, Debug, Clone)]
+impl Encode for ResourcePack<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.string(self.url);
+        encoder.string(self.hash);
+        encoder.bool(self.forced);
+        encoder.bool(self.has_prompt_message);
+        if self.has_prompt_message {
+            encoder.string(self.prompt_message.unwrap_or(""));
+        }
+    }
+}
+
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct TagQueryResponse<'a> {
     pub transaction_id: VarInt,
     pub nbt: NbtTag<'a>,

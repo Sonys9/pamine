@@ -1,8 +1,9 @@
 //! Chat messages, signed commands and message acknowledgements.
 
 use pcore::{
-    Decode,
+    Decode, Encode,
     decoder::{Decoder, Uuid},
+    encoder::Encoder,
     errors::Error,
 };
 
@@ -35,11 +36,28 @@ impl<'a> Decode<'a> for MessageAcknowledgment<'a> {
     }
 }
 
+impl Encode for MessageAcknowledgment<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.bool(self.has_data);
+        if self.has_data {
+            encoder.uuid(&self.profile_id.unwrap_or(Uuid::new([0; 16])));
+            encoder.bytes(self.last_signature.unwrap_or(&[]));
+        }
+    }
+}
+
 /// One `(argument name, signature)` pair of a signed chat command.
 #[derive(Debug, Clone)]
 pub struct ArgumentSignature<'a> {
     pub name: &'a str,
     pub signature: &'a [u8],
+}
+
+impl Encode for ArgumentSignature<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.string(self.name);
+        encoder.bytes(self.signature);
+    }
 }
 
 /// `Chat Command` (0x04).
@@ -77,11 +95,28 @@ impl<'a> Decode<'a> for ChatCommand<'a> {
     }
 }
 
+impl Encode for ChatCommand<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.string(self.command);
+        encoder.i64(self.timestamp);
+        encoder.i64(self.salt);
+        encoder.encode(&self.argument_signatures);
+        encoder.bool(self.signed_preview);
+    }
+}
+
 /// A previously seen chat message: its sender and signature.
 #[derive(Debug, Clone)]
 pub struct LastSeenMessage<'a> {
     pub sender: Uuid,
     pub signature: &'a [u8],
+}
+
+impl Encode for LastSeenMessage<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.uuid(&self.sender);
+        encoder.bytes(self.signature);
+    }
 }
 
 /// `Chat Message` (0x05).
@@ -133,7 +168,26 @@ impl<'a> Decode<'a> for ChatMessage<'a> {
     }
 }
 
-#[derive(Decode, Debug, Clone)]
+impl Encode for ChatMessage<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.string(self.message);
+        encoder.i64(self.timestamp);
+        encoder.i64(self.salt);
+        // A zero-length signature means "not signed".
+        encoder.bytes(self.signature.unwrap_or(&[]));
+        encoder.bool(self.signed_preview);
+        encoder.encode(&self.last_seen_messages);
+        match &self.last_received {
+            Some(last) => {
+                encoder.bool(true);
+                last.encode(encoder);
+            }
+            None => encoder.bool(false),
+        }
+    }
+}
+
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct ChatPreview<'a> {
     pub query: i32,
     pub message: &'a str,

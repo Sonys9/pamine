@@ -2,8 +2,9 @@
 //! combat.
 
 use pcore::{
-    Decode,
+    Decode, Encode,
     decoder::{Decoder, NbtTag, Uuid, VarInt},
+    encoder::Encoder,
     errors::Error,
 };
 
@@ -44,7 +45,56 @@ impl<'a> Decode<'a> for AwardStatistics<'a> {
     }
 }
 
-#[derive(Decode, Debug, Clone)]
+impl Encode for Statistic<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.varint(self.category_id.get());
+        encoder.varint(self.statistic_id.get());
+        encoder.varint(self.value.get());
+    }
+}
+
+impl Encode for AwardStatistics<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.varint(self.statistics.len() as i32);
+        for statistic in &self.statistics {
+            statistic.encode(encoder);
+        }
+    }
+}
+
+impl Encode for Login<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.i32(self.entity_id);
+        encoder.bool(self.is_hardcore);
+        encoder.u8(self.gamemode);
+        encoder.i8(self.previous_gamemode);
+        encoder.varint(self.dimension_names.len() as i32);
+        for name in &self.dimension_names {
+            encoder.string(name);
+        }
+        encoder.nbt(&self.registry_codec);
+        encoder.string(self.dimension_type);
+        encoder.string(self.dimension_name);
+        encoder.i64(self.hashed_seed);
+        encoder.varint(self.max_players.get());
+        encoder.varint(self.view_distance.get());
+        encoder.varint(self.simulation_distance.get());
+        encoder.bool(self.reduced_debug_info);
+        encoder.bool(self.enable_respawn_screen);
+        encoder.bool(self.is_debug);
+        encoder.bool(self.is_flat);
+        match (self.death_dimension_name, self.death_location) {
+            (Some(name), Some(location)) => {
+                encoder.bool(true);
+                encoder.string(name);
+                encoder.u64(location);
+            }
+            _ => encoder.bool(false),
+        }
+    }
+}
+
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct ChangeDifficulty {
     pub difficulty: u8,
     pub locked: bool,
@@ -183,14 +233,32 @@ impl<'a> Decode<'a> for Respawn<'a> {
     }
 }
 
-#[derive(Decode, Debug, Clone)]
+impl Encode for Respawn<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.string(self.dimension_type);
+        encoder.string(self.dimension_name);
+        encoder.i64(self.hashed_seed);
+        encoder.u8(self.gamemode);
+        encoder.i8(self.previous_gamemode);
+        encoder.bool(self.is_debug);
+        encoder.bool(self.is_flat);
+        encoder.bool(self.copy_metadata);
+        encoder.bool(self.has_death_location);
+        if self.has_death_location {
+            encoder.string(self.death_dimension_name.unwrap_or(""));
+            encoder.u64(self.death_location.unwrap_or(0));
+        }
+    }
+}
+
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct PlayerAbilities {
     pub flags: u8,
     pub flying_speed: f32,
     pub field_of_view_modifier: f32,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct SynchronizePlayerPosition {
     pub x: f64,
     pub y: f64,
@@ -202,51 +270,51 @@ pub struct SynchronizePlayerPosition {
     pub dismount_vehicle: bool,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct SetExperience {
     pub experience_bar: f32,
     pub level: VarInt,
     pub total_experience: VarInt,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct SetHealth {
     pub health: f32,
     pub food: VarInt,
     pub food_saturation: f32,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct SetDefaultSpawnPosition {
     pub location: u64,
     pub angle: f32,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct SetDisplayChatPreview {
     pub chat_preview_setting: bool,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct SetRenderDistance {
     pub view_distance: VarInt,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct SetSimulationDistance {
     pub simulation_distance: VarInt,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct EndCombat {
     pub duration: VarInt,
     pub entity_id: i32,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct EnterCombat {}
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct CombatDeath<'a> {
     pub player_id: VarInt,
     pub entity_id: i32,
@@ -351,5 +419,71 @@ impl<'a> Decode<'a> for PlayerInfo<'a> {
             Ok(entry)
         })?;
         Ok(Self { action, players })
+    }
+}
+
+impl Encode for PlayerProperty<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.string(self.name);
+        encoder.string(self.value);
+        match self.signature {
+            Some(signature) => {
+                encoder.bool(true);
+                encoder.string(signature);
+            }
+            None => encoder.bool(false),
+        }
+    }
+}
+
+impl Encode for PlayerSignatureData<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.i64(self.timestamp);
+        encoder.bytes(self.public_key);
+        encoder.bytes(self.signature);
+    }
+}
+
+impl Encode for PlayerInfoEntry<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.uuid(&self.uuid);
+        if let Some(name) = self.name {
+            encoder.string(name);
+        }
+        if let Some(properties) = &self.properties {
+            encoder.varint(properties.len() as i32);
+            for property in properties {
+                property.encode(encoder);
+            }
+        }
+        if let Some(game_mode) = self.game_mode {
+            encoder.varint(game_mode.get());
+        }
+        if let Some(latency) = self.latency {
+            encoder.varint(latency.get());
+        }
+        if let Some(display_name) = self.display_name {
+            match display_name {
+                Some(name) => {
+                    encoder.bool(true);
+                    encoder.string(name);
+                }
+                None => encoder.bool(false),
+            }
+        }
+        if let Some(signature_data) = &self.signature_data {
+            encoder.bool(true);
+            signature_data.encode(encoder);
+        }
+    }
+}
+
+impl Encode for PlayerInfo<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.varint(self.action.get());
+        encoder.varint(self.players.len() as i32);
+        for player in &self.players {
+            player.encode(encoder);
+        }
     }
 }

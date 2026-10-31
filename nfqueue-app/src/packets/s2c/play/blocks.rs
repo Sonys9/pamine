@@ -1,33 +1,34 @@
 //! Block changes, block entities and section updates.
 
 use pcore::{
-    Decode,
+    Decode, Encode,
     decoder::{Decoder, NbtTag, VarInt, VarLong},
+    encoder::Encoder,
     errors::Error,
 };
 
 use crate::packets::counted;
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct AcknowledgeBlockChange {
     pub sequence_id: VarInt,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct SetBlockDestroyStage {
     pub entity_id: VarInt,
     pub location: u64,
     pub destroy_stage: i8,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct BlockEntityData<'a> {
     pub location: u64,
     pub kind: VarInt,
     pub nbt: NbtTag<'a>,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct BlockAction {
     pub location: u64,
     pub action_id: u8,
@@ -35,13 +36,13 @@ pub struct BlockAction {
     pub block_type: VarInt,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct BlockUpdate {
     pub location: u64,
     pub block_id: VarInt,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct OpenSignEditor {
     pub location: u64,
 }
@@ -91,5 +92,19 @@ impl<'a> Decode<'a> for UpdateSectionBlocks {
             suppress_light_updates,
             blocks,
         })
+    }
+}
+
+impl Encode for SectionBlock {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.varlong(self.packed.get());
+    }
+}
+
+impl Encode for UpdateSectionBlocks {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.i64(self.chunk_section_position);
+        encoder.bool(self.suppress_light_updates);
+        encoder.encode(&self.blocks);
     }
 }

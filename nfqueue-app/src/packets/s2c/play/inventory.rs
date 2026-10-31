@@ -1,14 +1,15 @@
 //! Containers, slots, items and the recipe book.
 
 use pcore::{
-    Decode,
+    Decode, Encode,
     decoder::{Decoder, Slot, VarInt},
+    encoder::Encoder,
     errors::Error,
 };
 
 use crate::packets::{counted, identifiers};
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct CloseContainer {
     pub window_id: u8,
 }
@@ -48,14 +49,26 @@ impl<'a> Decode<'a> for SetContainerContent<'a> {
     }
 }
 
-#[derive(Decode, Debug, Clone)]
+impl Encode for SetContainerContent<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.u8(self.window_id);
+        encoder.varint(self.state_id.get());
+        encoder.varint(self.slots.len() as i32);
+        for slot in &self.slots {
+            encoder.slot(slot);
+        }
+        encoder.slot(&self.carried_item);
+    }
+}
+
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct SetContainerProperty {
     pub window_id: u8,
     pub property: i16,
     pub value: i16,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct SetContainerSlot<'a> {
     pub window_id: i8,
     pub state_id: VarInt,
@@ -64,38 +77,38 @@ pub struct SetContainerSlot<'a> {
     pub slot_data: Slot<'a>,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct SetCooldown {
     pub item_id: VarInt,
     pub cooldown_ticks: VarInt,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct OpenHorseScreen {
     pub window_id: u8,
     pub slot_count: VarInt,
     pub entity_id: i32,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct OpenBook {
     pub hand: VarInt,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct OpenScreen<'a> {
     pub window_id: VarInt,
     pub window_type: VarInt,
     pub window_title: &'a str,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct PlaceGhostRecipe<'a> {
     pub window_id: u8,
     pub recipe: &'a str,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct SetHeldItem {
     pub slot: u8,
 }
@@ -174,6 +187,41 @@ impl<'a> Decode<'a> for MerchantOffers<'a> {
     }
 }
 
+impl Encode for TradeOffer<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.slot(&self.input_item_1);
+        encoder.slot(&self.output_item);
+        match &self.input_item_2 {
+            Some(slot) => {
+                encoder.bool(true);
+                encoder.slot(slot);
+            }
+            None => encoder.bool(false),
+        }
+        encoder.bool(self.trade_disabled);
+        encoder.i32(self.number_of_trade_uses);
+        encoder.i32(self.maximum_number_of_trade_uses);
+        encoder.i32(self.xp);
+        encoder.i32(self.special_price);
+        encoder.f32(self.price_multiplier);
+        encoder.i32(self.demand);
+    }
+}
+
+impl Encode for MerchantOffers<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.varint(self.window_id.get());
+        encoder.varint(self.trades.len() as i32);
+        for trade in &self.trades {
+            trade.encode(encoder);
+        }
+        encoder.varint(self.villager_level.get());
+        encoder.varint(self.experience.get());
+        encoder.bool(self.is_regular_villager);
+        encoder.bool(self.can_restock);
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct UpdateRecipeBook<'a> {
     pub action: VarInt,
@@ -223,5 +271,24 @@ impl<'a> Decode<'a> for UpdateRecipeBook<'a> {
             recipe_ids,
             already_known,
         })
+    }
+}
+
+impl Encode for UpdateRecipeBook<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.varint(self.action.get());
+        encoder.bool(self.crafting_book_open);
+        encoder.bool(self.crafting_filter_active);
+        encoder.bool(self.smelting_book_open);
+        encoder.bool(self.smelting_filter_active);
+        encoder.bool(self.blast_furnace_open);
+        encoder.bool(self.blast_furnace_filter_active);
+        encoder.bool(self.smoker_open);
+        encoder.bool(self.smoker_filter_active);
+        encoder.encode(&self.recipe_ids);
+        // Only the "init" action carries the second array.
+        if let Some(already_known) = &self.already_known {
+            encoder.encode(already_known);
+        }
     }
 }

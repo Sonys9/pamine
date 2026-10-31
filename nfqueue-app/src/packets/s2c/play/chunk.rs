@@ -1,12 +1,13 @@
 //! Chunk data, light updates and chunk tracking.
 
 use pcore::{
-    Decode,
+    Decode, Encode,
     decoder::{Decoder, NbtTag, VarInt},
+    encoder::Encoder,
     errors::Error,
 };
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct UnloadChunk {
     pub chunk_x: i32,
     pub chunk_z: i32,
@@ -66,6 +67,22 @@ impl<'a> Decode<'a> for ChunkDataAndUpdateLight<'a> {
     }
 }
 
+impl Encode for ChunkDataAndUpdateLight<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.i32(self.chunk_x);
+        encoder.i32(self.chunk_z);
+        encoder.nbt(&self.heightmaps);
+        // `bytes()` writes the `Size` VarInt prefix, which is the field itself.
+        encoder.bytes(self.data);
+        encoder.varint(self.block_entities.len() as i32);
+        for entity in &self.block_entities {
+            entity.encode(encoder);
+        }
+        encoder.bool(self.trust_edges);
+        self.light.encode(encoder);
+    }
+}
+
 /// One block entity inside a chunk.
 #[derive(Debug, Clone)]
 pub struct BlockEntity<'a> {
@@ -84,6 +101,15 @@ impl<'a> Decode<'a> for BlockEntity<'a> {
             kind: decoder.varint()?,
             data: decoder.nbt()?,
         })
+    }
+}
+
+impl Encode for BlockEntity<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.u8(self.packed_xz);
+        encoder.i16(self.y);
+        encoder.varint(self.kind.get());
+        encoder.nbt(&self.data);
     }
 }
 
@@ -139,6 +165,31 @@ fn light_arrays<'a>(decoder: &mut Decoder<'a>) -> Result<Vec<&'a [u8]>, Error> {
     Ok(out)
 }
 
+impl Encode for LightData<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        write_bitset(encoder, self.sky_light_mask);
+        write_bitset(encoder, self.block_light_mask);
+        write_bitset(encoder, self.empty_sky_light_mask);
+        write_bitset(encoder, self.empty_block_light_mask);
+        write_light_arrays(encoder, &self.sky_light);
+        write_light_arrays(encoder, &self.block_light);
+    }
+}
+
+/// Writes a BitSet: a VarInt word count, then the words.
+fn write_bitset(encoder: &mut Encoder, words: &[u8]) {
+    encoder.varint((words.len() / 8) as i32);
+    encoder.raw(words);
+}
+
+/// Writes a length-prefixed array of length-prefixed arrays.
+fn write_light_arrays(encoder: &mut Encoder, arrays: &[&[u8]]) {
+    encoder.varint(arrays.len() as i32);
+    for array in arrays {
+        encoder.bytes(array);
+    }
+}
+
 /// Light-only update for a chunk. Shares the light section with
 /// [`ChunkDataAndUpdateLight`], so it needs the same hand-written `Decode`.
 #[derive(Debug, Clone)]
@@ -160,7 +211,16 @@ impl<'a> Decode<'a> for UpdateLight<'a> {
     }
 }
 
-#[derive(Decode, Debug, Clone)]
+impl Encode for UpdateLight<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.varint(self.chunk_x.get());
+        encoder.varint(self.chunk_z.get());
+        encoder.bool(self.trust_edges);
+        self.light.encode(encoder);
+    }
+}
+
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct SetCenterChunk {
     pub chunk_x: VarInt,
     pub chunk_z: VarInt,

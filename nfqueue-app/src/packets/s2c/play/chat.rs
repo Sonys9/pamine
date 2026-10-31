@@ -1,8 +1,9 @@
 //! Chat, signed messages and tab-list text.
 
 use pcore::{
-    Decode,
+    Decode, Encode,
     decoder::{Decoder, Uuid, VarInt},
+    encoder::Encoder,
     errors::Error,
 };
 
@@ -37,12 +38,22 @@ impl<'a> Decode<'a> for ChatPreview<'a> {
     }
 }
 
-#[derive(Decode, Debug, Clone)]
+impl Encode for ChatPreview<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.i32(self.query_id);
+        encoder.bool(self.has_component);
+        if self.has_component {
+            encoder.string(self.message.unwrap_or(""));
+        }
+    }
+}
+
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct HideMessage<'a> {
     pub signature: &'a [u8],
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct Disconnect<'a> {
     pub reason: &'a str,
 }
@@ -72,11 +83,28 @@ impl<'a> Decode<'a> for MessageHeader<'a> {
     }
 }
 
+impl Encode for MessageHeader<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.bool(self.has_preceding_signature);
+        if self.has_preceding_signature {
+            encoder.bytes(self.preceding_signature.unwrap_or(&[]));
+        }
+        encoder.uuid(&self.sender);
+    }
+}
+
 /// A previously sent message, referenced by its sender and signature.
 #[derive(Debug, Clone)]
 pub struct PreviousMessage<'a> {
     pub sender: Uuid,
     pub signature: &'a [u8],
+}
+
+impl Encode for PreviousMessage<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.uuid(&self.sender);
+        encoder.bytes(self.signature);
+    }
 }
 
 /// `Player Chat Message` (0x33).
@@ -174,6 +202,47 @@ impl<'a> Decode<'a> for PlayerChatMessage<'a> {
     }
 }
 
+impl Encode for PlayerChatMessage<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        // A zero-length signature means "not signed".
+        encoder.bytes(self.signature.unwrap_or(&[]));
+        encoder.uuid(&self.sender);
+        encoder.bytes(self.header_signature);
+        encoder.string(self.plain_message);
+        match self.formatted_message {
+            Some(message) => {
+                encoder.bool(true);
+                encoder.string(message);
+            }
+            None => encoder.bool(false),
+        }
+        encoder.i64(self.timestamp);
+        encoder.i64(self.salt);
+        encoder.encode(&self.previous_messages);
+        match self.unsigned_content {
+            Some(content) => {
+                encoder.bool(true);
+                encoder.string(content);
+            }
+            None => encoder.bool(false),
+        }
+        encoder.varint(self.filter_type.get());
+        // The mask is only on the wire for the "partially filtered" type.
+        if self.filter_type.get() == CHAT_FILTER_PARTIALLY_FILTERED {
+            write_bitset(encoder, self.filter_mask.unwrap_or(&[]));
+        }
+        encoder.varint(self.network_target.get());
+        encoder.string(self.network_name);
+        match self.network_target_name {
+            Some(name) => {
+                encoder.bool(true);
+                encoder.string(name);
+            }
+            None => encoder.bool(false),
+        }
+    }
+}
+
 /// A BitSet is a VarInt count of `i64` words, then that many words.
 fn bitset<'a>(decoder: &mut Decoder<'a>) -> Result<&'a [u8], Error> {
     let count = decoder.varint()?.get();
@@ -183,13 +252,19 @@ fn bitset<'a>(decoder: &mut Decoder<'a>) -> Result<&'a [u8], Error> {
     decoder.read_len(count as usize * 8)
 }
 
-#[derive(Decode, Debug, Clone)]
+/// Writes a BitSet: a VarInt word count, then the words.
+fn write_bitset(encoder: &mut Encoder, words: &[u8]) {
+    encoder.varint((words.len() / 8) as i32);
+    encoder.raw(words);
+}
+
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct SystemChatMessage<'a> {
     pub json_data: &'a str,
     pub overlay: bool,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct SetTabListHeaderAndFooter<'a> {
     pub header: &'a str,
     pub footer: &'a str,
@@ -199,6 +274,13 @@ pub struct SetTabListHeaderAndFooter<'a> {
 pub struct ChatSuggestions<'a> {
     pub action: VarInt,
     pub entries: Vec<&'a str>,
+}
+
+impl Encode for ChatSuggestions<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.varint(self.action.get());
+        encoder.encode(&self.entries);
+    }
 }
 
 impl<'a> Decode<'a> for ChatSuggestions<'a> {

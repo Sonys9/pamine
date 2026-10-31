@@ -1,12 +1,13 @@
 //! Scoreboard objectives, teams and scores.
 
 use pcore::{
-    Decode,
+    Decode, Encode,
     decoder::{Decoder, MAX_ELEMENTS, VarInt},
+    encoder::Encoder,
     errors::Error,
 };
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct DisplayObjective<'a> {
     pub position: u8,
     pub score_name: &'a str,
@@ -40,6 +41,17 @@ impl<'a> Decode<'a> for UpdateObjectives<'a> {
             objective_value,
             kind,
         })
+    }
+}
+
+impl Encode for UpdateObjectives<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.string(self.objective_name);
+        encoder.u8(self.mode);
+        if self.mode == 0 || self.mode == 2 {
+            encoder.string(self.objective_value.unwrap_or(""));
+            encoder.varint(self.kind.map(|k| k.get()).unwrap_or(0));
+        }
     }
 }
 
@@ -137,6 +149,67 @@ fn team_entities<'a>(decoder: &mut Decoder<'a>) -> Result<Vec<&'a str>, Error> {
     Ok(entities)
 }
 
+impl Encode for TeamAction<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        match self {
+            Self::Create {
+                display_name,
+                friendly_flags,
+                name_tag_visibility,
+                collision_rule,
+                color,
+                prefix,
+                suffix,
+                entities,
+            } => {
+                encoder.u8(0);
+                encoder.string(display_name);
+                encoder.u8(*friendly_flags);
+                encoder.string(name_tag_visibility);
+                encoder.string(collision_rule);
+                encoder.varint(color.get());
+                encoder.string(prefix);
+                encoder.string(suffix);
+                encoder.encode(entities);
+            }
+            Self::Remove => encoder.u8(1),
+            Self::Update {
+                display_name,
+                friendly_flags,
+                name_tag_visibility,
+                collision_rule,
+                color,
+                prefix,
+                suffix,
+            } => {
+                encoder.u8(2);
+                encoder.string(display_name);
+                encoder.u8(*friendly_flags);
+                encoder.string(name_tag_visibility);
+                encoder.string(collision_rule);
+                encoder.varint(color.get());
+                encoder.string(prefix);
+                encoder.string(suffix);
+            }
+            Self::AddEntities { entities } => {
+                encoder.u8(3);
+                encoder.encode(entities);
+            }
+            Self::RemoveEntities { entities } => {
+                encoder.u8(4);
+                encoder.encode(entities);
+            }
+        }
+    }
+}
+
+impl Encode for UpdateTeams<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.string(self.team_name);
+        self.action.encode(encoder);
+    }
+}
+
 /// `Update Score` (0x59).
 ///
 /// Hand-written `Decode`: `value` is present for every action except 1
@@ -166,5 +239,16 @@ impl<'a> Decode<'a> for UpdateScore<'a> {
             objective_name,
             value,
         })
+    }
+}
+
+impl Encode for UpdateScore<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.string(self.entity_name);
+        encoder.varint(self.action.get());
+        encoder.string(self.objective_name);
+        if self.action.get() != 1 {
+            encoder.varint(self.value.map(|v| v.get()).unwrap_or(0));
+        }
     }
 }

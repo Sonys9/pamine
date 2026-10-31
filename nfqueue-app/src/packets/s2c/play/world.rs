@@ -1,15 +1,16 @@
 //! World state: border, time, events, explosions, particles and maps.
 
 use pcore::{
-    Decode,
+    Decode, Encode,
     decoder::{Decoder, VarInt, VarLong},
+    encoder::Encoder,
     errors::Error,
 };
 
-use super::particle::{ParticleData, particle_data};
+use super::particle::{ParticleData, particle_data, write_particle_data};
 use crate::packets::{counted, optional_chat};
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct InitializeWorldBorder {
     pub x: f64,
     pub z: f64,
@@ -23,13 +24,13 @@ pub struct InitializeWorldBorder {
     pub warning_time: VarInt,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct SetBorderCenter {
     pub x: f64,
     pub z: f64,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct SetBorderLerpSize {
     pub old_diameter: f64,
     pub new_diameter: f64,
@@ -37,28 +38,28 @@ pub struct SetBorderLerpSize {
     pub speed: VarLong,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct SetBorderSize {
     pub diameter: f64,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct SetBorderWarningDelay {
     pub warning_time: VarInt,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct SetBorderWarningDistance {
     pub warning_blocks: VarInt,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct GameEvent {
     pub event: u8,
     pub value: f32,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct WorldEvent {
     pub event: i32,
     pub location: u64,
@@ -66,7 +67,7 @@ pub struct WorldEvent {
     pub disable_relative_volume: bool,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct UpdateTime {
     pub world_age: i64,
     pub time_of_day: i64,
@@ -116,6 +117,24 @@ impl<'a> Decode<'a> for Explosion {
     }
 }
 
+impl Encode for Explosion {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.f32(self.x);
+        encoder.f32(self.y);
+        encoder.f32(self.z);
+        encoder.f32(self.strength);
+        encoder.varint(self.records.len() as i32);
+        for record in &self.records {
+            encoder.i8(record.x);
+            encoder.i8(record.y);
+            encoder.i8(record.z);
+        }
+        for axis in self.player_motion {
+            encoder.f32(axis);
+        }
+    }
+}
+
 /// `Particle` (0x23).
 ///
 /// Hand-written `Decode`: the trailing `Data` field is a union keyed by
@@ -162,6 +181,22 @@ impl<'a> Decode<'a> for Particle<'a> {
             particle_count,
             data,
         })
+    }
+}
+
+impl Encode for Particle<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.varint(self.particle_id.get());
+        encoder.bool(self.long_distance);
+        encoder.f64(self.x);
+        encoder.f64(self.y);
+        encoder.f64(self.z);
+        encoder.f32(self.offset_x);
+        encoder.f32(self.offset_y);
+        encoder.f32(self.offset_z);
+        encoder.f32(self.max_speed);
+        encoder.i32(self.particle_count);
+        write_particle_data(encoder, &self.data);
     }
 }
 
@@ -248,5 +283,43 @@ impl<'a> Decode<'a> for MapData<'a> {
             z,
             data,
         })
+    }
+}
+
+impl Encode for MapIcon<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.varint(self.kind.get());
+        encoder.i8(self.x);
+        encoder.i8(self.z);
+        encoder.i8(self.direction);
+        match self.display_name {
+            Some(name) => {
+                encoder.bool(true);
+                encoder.string(name);
+            }
+            None => encoder.bool(false),
+        }
+    }
+}
+
+impl Encode for MapData<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.varint(self.map_id.get());
+        encoder.i8(self.scale);
+        encoder.bool(self.locked);
+        encoder.bool(self.tracking_position);
+        if self.tracking_position {
+            encoder.varint(self.icons.len() as i32);
+            for icon in &self.icons {
+                icon.encode(encoder);
+            }
+        }
+        encoder.u8(self.columns);
+        if self.columns > 0 {
+            encoder.u8(self.rows.unwrap_or(0));
+            encoder.i8(self.x.unwrap_or(0));
+            encoder.i8(self.z.unwrap_or(0));
+            encoder.bytes(self.data.unwrap_or(&[]));
+        }
     }
 }

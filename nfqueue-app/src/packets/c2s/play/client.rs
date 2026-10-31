@@ -1,19 +1,20 @@
 //! Client settings, keep-alive and other connection-level packets.
 
 use pcore::{
-    Decode,
+    Decode, Encode,
     decoder::{Decoder, VarInt},
+    encoder::Encoder,
     errors::Error,
 };
 
 use crate::packets::counted;
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct ClientCommand {
     pub action_id: VarInt,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct ClientInformation<'a> {
     pub locale: &'a str,
     pub view_distance: i8,
@@ -25,50 +26,50 @@ pub struct ClientInformation<'a> {
     pub allow_server_listings: bool,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct CommandSuggestionsRequest<'a> {
     pub transaction_id: VarInt,
     pub text: &'a str,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct PlayerAbilities {
     pub flags: u8,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct PlayerInput {
     pub sideways: f32,
     pub forward: f32,
     pub flags: u8,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct ResourcePackResponse {
     pub result: VarInt,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct KeepAlive {
     pub keep_alive_id: i64,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct Pong {
     pub id: i32,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct ChangeDifficulty {
     pub difficulty: u8,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct LockDifficulty {
     pub locked: bool,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct PluginMessage<'a> {
     pub channel: &'a str,
     /// The payload has no length prefix: its length is whatever remains in the
@@ -95,5 +96,19 @@ impl<'a> Decode<'a> for EditBook<'a> {
             None
         };
         Ok(Self { slot, pages, title })
+    }
+}
+
+impl Encode for EditBook<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.varint(self.slot.get());
+        encoder.encode(&self.pages);
+        match self.title {
+            Some(title) => {
+                encoder.bool(true);
+                encoder.string(title);
+            }
+            None => encoder.bool(false),
+        }
     }
 }

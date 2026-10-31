@@ -13,6 +13,7 @@
 use pcore::{
     Decode,
     decoder::{Decoder, Slot, VarInt},
+    encoder::Encoder,
     errors::Error,
 };
 
@@ -116,4 +117,54 @@ pub fn particle_data<'a>(
         // Every other 1.19.2 particle is payload-free.
         _ => ParticleData::None,
     })
+}
+
+/// Writes the payload of a particle, without the type id.
+///
+/// The variant itself says which layout to use, so the id is not needed here.
+pub fn write_particle_data(encoder: &mut Encoder, data: &ParticleData<'_>) {
+    match data {
+        ParticleData::None => {}
+        ParticleData::BlockState(state) => encoder.varint(state.get()),
+        ParticleData::Dust {
+            red,
+            green,
+            blue,
+            scale,
+        } => {
+            encoder.f32(*red);
+            encoder.f32(*green);
+            encoder.f32(*blue);
+            encoder.f32(*scale);
+        }
+        ParticleData::DustColorTransition { from, scale, to } => {
+            for channel in from {
+                encoder.f32(*channel);
+            }
+            encoder.f32(*scale);
+            for channel in to {
+                encoder.f32(*channel);
+            }
+        }
+        ParticleData::Item(slot) => encoder.slot(slot),
+        ParticleData::Vibration { source, ticks } => {
+            match source {
+                VibrationSource::Block(position) => {
+                    encoder.varint(0);
+                    encoder.u64(*position);
+                }
+                VibrationSource::Entity {
+                    entity_id,
+                    eye_height,
+                } => {
+                    encoder.varint(1);
+                    encoder.varint(entity_id.get());
+                    encoder.f32(*eye_height);
+                }
+            }
+            encoder.varint(ticks.get());
+        }
+        ParticleData::SculkCharge { roll } => encoder.f32(*roll),
+        ParticleData::Shriek { delay } => encoder.varint(delay.get()),
+    }
 }

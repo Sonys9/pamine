@@ -1,8 +1,9 @@
 //! Command graph and tab-completion responses.
 
 use pcore::{
-    Decode,
+    Decode, Encode,
     decoder::{Decoder, VarInt},
+    encoder::Encoder,
     errors::Error,
 };
 
@@ -41,6 +42,28 @@ impl<'a> Decode<'a> for CommandSuggestionsResponse<'a> {
             length,
             matches,
         })
+    }
+}
+
+impl Encode for SuggestionMatch<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.string(self.text);
+        match self.tooltip {
+            Some(tooltip) => {
+                encoder.bool(true);
+                encoder.string(tooltip);
+            }
+            None => encoder.bool(false),
+        }
+    }
+}
+
+impl Encode for CommandSuggestionsResponse<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.varint(self.id.get());
+        encoder.varint(self.start.get());
+        encoder.varint(self.length.get());
+        encoder.encode(&self.matches);
     }
 }
 
@@ -194,6 +217,118 @@ impl<'a> Decode<'a> for CommandNode<'a> {
             parser,
             suggestions,
         })
+    }
+}
+
+impl Encode for Commands<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.varint(self.nodes.len() as i32);
+        for node in &self.nodes {
+            node.encode(encoder);
+        }
+        encoder.varint(self.root_index.get());
+    }
+}
+
+impl Encode for CommandNode<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.u8(self.flags);
+        encoder.varint(self.children.len() as i32);
+        for child in &self.children {
+            encoder.varint(child.get());
+        }
+        if let Some(redirect) = self.redirect {
+            encoder.varint(redirect.get());
+        }
+        if let Some(name) = self.name {
+            encoder.string(name);
+        }
+        if let Some(parser_id) = self.parser_id {
+            encoder.varint(parser_id.get());
+            if let Some(parser) = &self.parser {
+                parser.encode(encoder);
+            }
+        }
+        if let Some(suggestions) = self.suggestions {
+            encoder.string(suggestions);
+        }
+    }
+}
+
+impl Encode for CommandParser<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        match self {
+            Self::None => {}
+            Self::Double { min, max } => {
+                let mut flags = 0u8;
+                if min.is_some() {
+                    flags |= 0x01;
+                }
+                if max.is_some() {
+                    flags |= 0x02;
+                }
+                encoder.u8(flags);
+                if let Some(min) = min {
+                    encoder.f64(*min);
+                }
+                if let Some(max) = max {
+                    encoder.f64(*max);
+                }
+            }
+            Self::Float { min, max } => {
+                let mut flags = 0u8;
+                if min.is_some() {
+                    flags |= 0x01;
+                }
+                if max.is_some() {
+                    flags |= 0x02;
+                }
+                encoder.u8(flags);
+                if let Some(min) = min {
+                    encoder.f32(*min);
+                }
+                if let Some(max) = max {
+                    encoder.f32(*max);
+                }
+            }
+            Self::Integer { min, max } => {
+                let mut flags = 0u8;
+                if min.is_some() {
+                    flags |= 0x01;
+                }
+                if max.is_some() {
+                    flags |= 0x02;
+                }
+                encoder.u8(flags);
+                if let Some(min) = min {
+                    encoder.i32(*min);
+                }
+                if let Some(max) = max {
+                    encoder.i32(*max);
+                }
+            }
+            Self::Long { min, max } => {
+                let mut flags = 0u8;
+                if min.is_some() {
+                    flags |= 0x01;
+                }
+                if max.is_some() {
+                    flags |= 0x02;
+                }
+                encoder.u8(flags);
+                if let Some(min) = min {
+                    encoder.i64(*min);
+                }
+                if let Some(max) = max {
+                    encoder.i64(*max);
+                }
+            }
+            Self::String { behavior } => encoder.varint(behavior.get()),
+            Self::Entity { flags } => encoder.u8(*flags),
+            Self::ScoreHolder { flags } => encoder.u8(*flags),
+            Self::Time { min } => encoder.i32(*min),
+            Self::Resource { registry } => encoder.string(registry),
+        }
     }
 }
 

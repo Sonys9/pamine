@@ -1,13 +1,14 @@
 //! Serverbound login packets (protocol 760 / 1.19.2).
 
 use pcore::{
-    Decode,
+    Decode, Encode,
     decoder::{Decoder, Uuid, VarInt},
+    encoder::Encoder,
     errors::Error,
 };
-use pcore_gen::DecodePacket;
+use pcore_gen::{DecodePacket, EncodePacket};
 
-#[derive(DecodePacket, Clone, Debug)]
+#[derive(DecodePacket, EncodePacket, Clone, Debug)]
 pub enum Login<'a> {
     #[id(0x00)]
     LoginStart(LoginStart<'a>),
@@ -17,14 +18,14 @@ pub enum Login<'a> {
     LoginPluginResponse(LoginPluginResponse<'a>),
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct LoginStart<'a> {
     pub name: &'a str,
     pub sig_data: Option<SigData<'a>>,
     pub player_uuid: Option<Uuid>,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct SigData<'a> {
     pub timestamp: i64,
     pub public_key: &'a [u8],
@@ -67,6 +68,20 @@ impl<'a> Decode<'a> for EncryptionResponse<'a> {
     }
 }
 
+impl Encode for EncryptionResponse<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.bytes(self.shared_secret);
+        encoder.bool(self.has_verify_token);
+        // The two tails are mutually exclusive, mirroring the decoder.
+        if self.has_verify_token {
+            encoder.bytes(self.verify_token.unwrap_or(&[]));
+        } else {
+            encoder.i64(self.salt.unwrap_or(0));
+            encoder.bytes(self.message_signature.unwrap_or(&[]));
+        }
+    }
+}
+
 /// `Login Plugin Response` (0x02).
 ///
 /// Hand-written `Decode`: `data` is an *Optional Byte Array* — a VarInt length
@@ -94,5 +109,16 @@ impl<'a> Decode<'a> for LoginPluginResponse<'a> {
             successful,
             data,
         })
+    }
+}
+
+impl Encode for LoginPluginResponse<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.varint(self.message_id.get());
+        encoder.bool(self.successful);
+        // `data` is an Optional Byte Array: a zero length means absent.
+        if self.successful {
+            encoder.bytes(self.data.unwrap_or(&[]));
+        }
     }
 }

@@ -1,8 +1,9 @@
 //! Titles, boss bars and other on-screen UI elements.
 
 use pcore::{
-    Decode,
+    Decode, Encode,
     decoder::{Decoder, Uuid, VarInt},
+    encoder::Encoder,
     errors::Error,
 };
 
@@ -66,27 +67,73 @@ impl<'a> Decode<'a> for BossBar<'a> {
     }
 }
 
-#[derive(Decode, Debug, Clone)]
+impl Encode for BossBarAction<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        match self {
+            Self::Add {
+                title,
+                health,
+                color,
+                division,
+                flags,
+            } => {
+                encoder.varint(0);
+                encoder.string(title);
+                encoder.f32(*health);
+                encoder.varint(color.get());
+                encoder.varint(division.get());
+                encoder.u8(*flags);
+            }
+            Self::Remove => encoder.varint(1),
+            Self::UpdateHealth { health } => {
+                encoder.varint(2);
+                encoder.f32(*health);
+            }
+            Self::UpdateTitle { title } => {
+                encoder.varint(3);
+                encoder.string(title);
+            }
+            Self::UpdateStyle { color, division } => {
+                encoder.varint(4);
+                encoder.varint(color.get());
+                encoder.varint(division.get());
+            }
+            Self::UpdateFlags { flags } => {
+                encoder.varint(5);
+                encoder.u8(*flags);
+            }
+        }
+    }
+}
+
+impl Encode for BossBar<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.uuid(&self.uuid);
+        self.action.encode(encoder);
+    }
+}
+
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct ClearTitles {
     pub reset: bool,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct SetActionBarText<'a> {
     pub action_bar_text: &'a str,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct SetSubtitleText<'a> {
     pub subtitle_text: &'a str,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct SetTitleText<'a> {
     pub title_text: &'a str,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct SetTitleAnimationTimes {
     pub fade_in: i32,
     pub stay: i32,

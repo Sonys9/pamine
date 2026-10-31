@@ -1,15 +1,16 @@
 //! Entity lifecycle, movement, metadata and attributes.
 
 use pcore::{
-    Decode,
+    Decode, Encode,
     decoder::{Decoder, NbtTag, Slot, Uuid, VarInt},
+    encoder::Encoder,
     errors::Error,
 };
 
-use super::particle::{ParticleData, particle_data};
+use super::particle::{ParticleData, particle_data, write_particle_data};
 use crate::packets::{counted, optional_chat};
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct SpawnEntity {
     pub entity_id: VarInt,
     pub entity_uuid: Uuid,
@@ -26,7 +27,7 @@ pub struct SpawnEntity {
     pub velocity_z: i16,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct SpawnExperienceOrb {
     pub entity_id: VarInt,
     pub x: f64,
@@ -35,7 +36,7 @@ pub struct SpawnExperienceOrb {
     pub count: i16,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct SpawnPlayer {
     pub entity_id: VarInt,
     pub player_uuid: Uuid,
@@ -46,19 +47,19 @@ pub struct SpawnPlayer {
     pub pitch: u8,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct EntityAnimation {
     pub entity_id: VarInt,
     pub animation: u8,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct EntityEvent {
     pub entity_id: i32,
     pub entity_status: i8,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct UpdateEntityPosition {
     pub entity_id: VarInt,
     pub delta_x: i16,
@@ -67,7 +68,7 @@ pub struct UpdateEntityPosition {
     pub on_ground: bool,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct UpdateEntityPositionAndRotation {
     pub entity_id: VarInt,
     pub delta_x: i16,
@@ -78,7 +79,7 @@ pub struct UpdateEntityPositionAndRotation {
     pub on_ground: bool,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct UpdateEntityRotation {
     pub entity_id: VarInt,
     pub yaw: u8,
@@ -86,7 +87,7 @@ pub struct UpdateEntityRotation {
     pub on_ground: bool,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct MoveVehicle {
     pub x: f64,
     pub y: f64,
@@ -136,6 +137,20 @@ impl<'a> Decode<'a> for LookAt {
     }
 }
 
+impl Encode for LookAt {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.varint(self.feet_eyes.get());
+        encoder.f64(self.target_x);
+        encoder.f64(self.target_y);
+        encoder.f64(self.target_z);
+        encoder.bool(self.is_entity);
+        if self.is_entity {
+            encoder.varint(self.entity_id.map(|v| v.get()).unwrap_or(0));
+            encoder.varint(self.entity_feet_eyes.map(|v| v.get()).unwrap_or(0));
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RemoveEntities {
     pub entity_ids: Vec<VarInt>,
@@ -148,19 +163,25 @@ impl<'a> Decode<'a> for RemoveEntities {
     }
 }
 
-#[derive(Decode, Debug, Clone)]
+impl Encode for RemoveEntities {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.encode(&self.entity_ids);
+    }
+}
+
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct RemoveEntityEffect {
     pub entity_id: VarInt,
     pub effect_id: VarInt,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct SetHeadRotation {
     pub entity_id: VarInt,
     pub head_yaw: u8,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct SetCamera {
     pub camera_id: VarInt,
 }
@@ -217,6 +238,127 @@ pub enum MetadataValue<'a> {
     CatVariant(VarInt),
     /// An id in the `minecraft:frog_variant` registry.
     FrogVariant(VarInt),
+}
+
+impl Encode for MetadataValue<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        match self {
+            Self::Byte(v) => {
+                encoder.varint(0);
+                encoder.i8(*v);
+            }
+            Self::VarInt(v) => {
+                encoder.varint(1);
+                encoder.varint(v.get());
+            }
+            Self::Float(v) => {
+                encoder.varint(2);
+                encoder.f32(*v);
+            }
+            Self::String(v) => {
+                encoder.varint(3);
+                encoder.string(v);
+            }
+            Self::Chat(v) => {
+                encoder.varint(4);
+                encoder.string(v);
+            }
+            Self::OptChat(v) => {
+                encoder.varint(5);
+                match v {
+                    Some(text) => {
+                        encoder.bool(true);
+                        encoder.string(text);
+                    }
+                    None => encoder.bool(false),
+                }
+            }
+            Self::Slot(v) => {
+                encoder.varint(6);
+                encoder.slot(v);
+            }
+            Self::Boolean(v) => {
+                encoder.varint(7);
+                encoder.bool(*v);
+            }
+            Self::Rotation(v) => {
+                encoder.varint(8);
+                for axis in v {
+                    encoder.f32(*axis);
+                }
+            }
+            Self::Position(v) => {
+                encoder.varint(9);
+                encoder.u64(*v);
+            }
+            Self::OptPosition(v) => {
+                encoder.varint(10);
+                match v {
+                    Some(position) => {
+                        encoder.bool(true);
+                        encoder.u64(*position);
+                    }
+                    None => encoder.bool(false),
+                }
+            }
+            Self::Direction(v) => {
+                encoder.varint(11);
+                encoder.varint(v.get());
+            }
+            Self::OptUuid(v) => {
+                encoder.varint(12);
+                match v {
+                    Some(uuid) => {
+                        encoder.bool(true);
+                        encoder.uuid(uuid);
+                    }
+                    None => encoder.bool(false),
+                }
+            }
+            Self::OptBlockId(v) => {
+                encoder.varint(13);
+                encoder.varint(v.map(|id| id.get()).unwrap_or(0));
+            }
+            Self::Nbt(v) => {
+                encoder.varint(14);
+                encoder.nbt(v);
+            }
+            Self::Particle { particle_id, data } => {
+                encoder.varint(15);
+                encoder.varint(particle_id.get());
+                write_particle_data(encoder, data);
+            }
+            Self::VillagerData {
+                kind,
+                profession,
+                level,
+            } => {
+                encoder.varint(16);
+                encoder.varint(kind.get());
+                encoder.varint(profession.get());
+                encoder.varint(level.get());
+            }
+            Self::OptVarInt(v) => {
+                encoder.varint(17);
+                encoder.varint(match v {
+                    Some(value) => value.get() + 1,
+                    None => 0,
+                });
+            }
+            Self::Pose(v) => {
+                encoder.varint(18);
+                encoder.varint(v.get());
+            }
+            Self::CatVariant(v) => {
+                encoder.varint(19);
+                encoder.varint(v.get());
+            }
+            Self::FrogVariant(v) => {
+                encoder.varint(20);
+                encoder.varint(v.get());
+            }
+        }
+    }
 }
 
 impl<'a> MetadataValue<'a> {
@@ -303,13 +445,24 @@ impl<'a> Decode<'a> for SetEntityMetadata<'a> {
     }
 }
 
-#[derive(Decode, Debug, Clone)]
+impl Encode for SetEntityMetadata<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.varint(self.entity_id.get());
+        for entry in &self.metadata {
+            encoder.u8(entry.index);
+            entry.value.encode(encoder);
+        }
+        encoder.u8(0xFF);
+    }
+}
+
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct LinkEntities {
     pub attached_entity_id: i32,
     pub holding_entity_id: i32,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct SetEntityVelocity {
     pub entity_id: VarInt,
     pub velocity_x: i16,
@@ -361,6 +514,28 @@ impl<'a> Decode<'a> for SetEquipment<'a> {
     }
 }
 
+impl Encode for EquipmentEntry<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.i8(self.slot);
+        encoder.slot(&self.item);
+    }
+}
+
+impl Encode for SetEquipment<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        const CONTINUED: u8 = 0x80;
+
+        encoder.varint(self.entity_id.get());
+        let last = self.equipment.len().saturating_sub(1);
+        for (index, entry) in self.equipment.iter().enumerate() {
+            // The high bit marks "another entry follows".
+            let raw = entry.slot as u8 | if index < last { CONTINUED } else { 0 };
+            encoder.u8(raw);
+            encoder.slot(&entry.item);
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SetPassengers {
     pub entity_id: VarInt,
@@ -378,14 +553,21 @@ impl<'a> Decode<'a> for SetPassengers {
     }
 }
 
-#[derive(Decode, Debug, Clone)]
+impl Encode for SetPassengers {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.varint(self.entity_id.get());
+        encoder.encode(&self.passengers);
+    }
+}
+
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct PickupItem {
     pub collected_entity_id: VarInt,
     pub collector_entity_id: VarInt,
     pub pickup_item_count: VarInt,
 }
 
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct TeleportEntity {
     pub entity_id: VarInt,
     pub x: f64,
@@ -444,11 +626,40 @@ impl<'a> Decode<'a> for UpdateAttributes<'a> {
     }
 }
 
+impl Encode for AttributeModifier {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.uuid(&self.uuid);
+        encoder.f64(self.amount);
+        encoder.u8(self.operation);
+    }
+}
+
+impl Encode for AttributeEntry<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.string(self.key);
+        encoder.f64(self.value);
+        encoder.varint(self.modifiers.len() as i32);
+        for modifier in &self.modifiers {
+            modifier.encode(encoder);
+        }
+    }
+}
+
+impl Encode for UpdateAttributes<'_> {
+    fn encode(&self, encoder: &mut Encoder) {
+        encoder.varint(self.entity_id.get());
+        encoder.varint(self.properties.len() as i32);
+        for property in &self.properties {
+            property.encode(encoder);
+        }
+    }
+}
+
 /// `Entity Effect` (0x69).
 ///
 /// `factor_data` is gated by a boolean on the wire; `Option<NbtTag>` reads that
 /// boolean itself, so there is no separate `has_factor_data` field.
-#[derive(Decode, Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub struct EntityEffect<'a> {
     pub entity_id: VarInt,
     pub effect_id: VarInt,
