@@ -1,18 +1,14 @@
 use std::{
-    net::SocketAddr,
-    os::fd::{AsRawFd, FromRawFd},
-    sync::Arc,
-    time::Duration,
+    borrow::Cow, net::SocketAddr, os::fd::{AsRawFd, FromRawFd}, sync::Arc, time::Duration,
 };
 
+use pcore::{Encode, encode};
 use socket2::{Domain, SockAddr, Type};
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::{
+    io::{AsyncReadExt, AsyncWriteExt}, net::{
         TcpStream,
         tcp::{OwnedReadHalf, OwnedWriteHalf},
-    },
-    sync::Mutex,
+    }, sync::{Mutex, MutexGuard},
 };
 use tracing::{error, info};
 
@@ -103,42 +99,58 @@ impl Connector {
                     target_addr,
                 );
             };
-
-            // Scope the lock so it is released before the write below. Holding it
-            // across `write_all` would let a slow peer block the other direction.
-            {
-                let mut parser = parser.lock().await;
-                parser.update(side, &buffer[..len]);
-                loop {
-                    match parser.try_parse(side) {
-                        // `None` means the buffer holds only a partial packet;
-                        // wait for the next read instead of logging an error.
-                        Ok(None) => break,
-                        Ok(Some(packet)) => {
-                            // let str_packet = format!("{:?}", packet);
-                            // info!("[{:?}] parsed packet: {}", side, str_packet.chars().take(200).collect::<String>());
-                            if let C2S(C2SPacket::Play(c2s::play::Play::ChatMessage(message))) =
-                                packet
-                            {
-                                info!("Just heard a message: {}!", message.message);
-                            };
-                            parser.clear(side);
-                        }
-                        Err(e) => {
-                            error!(
-                                "[{:?}] parse error: {} got buffer: {:?} (could be not full, that's end part, max 50 bytes)",
-                                side,
-                                e,
-                                &buffer[..len.min(50)] // we dont need more right?
-                            );
-                        }
-                    }
-                }
-            }
-
-            target_stream.write_all(&buffer[..len]).await?;
+            
+            let mut parser = parser.lock().await;
+            parser.update(side, &buffer[..len]);
+            loop {
+                match parse_packet(&mut parser, side, &buffer[..len]) {
+                    Some(packet) => target_stream.write_all(&packet).await?,
+                    None => break
+                };
+                parser.clear(side);
+            };
+            drop(parser);
         }
     }
+}
+
+// Moved this code to the fn to decrease the nesting
+#[inline(always)]
+fn parse_packet<'a>(parser: &'a mut MutexGuard<'_, Parser>, side: Side, buffer: &[u8]) -> Option<Cow<'a, [u8]>> {
+    match parser.try_parse(side) {
+        // `None` means the buffer holds only a partial packet;
+        // wait for the next read instead of logging an error.
+        Ok(None) => return None,
+        Ok(Some(packet)) => {
+            if 
+                let C2S(C2SPacket::Play(c2s::play::Play::ChatMessage(message))) = packet
+                && let Some(new_packet) = on_message(message)
+            {
+                return Some(Cow::Owned(new_packet));
+            };
+        }
+        Err(e) => {
+            error!(
+                "[{:?}] parse error: {} got buffer: {:?} (could be not full, that's end part, max 50 bytes)",
+                side,
+                e,
+                &buffer[..buffer.len().min(50)]
+            );
+        }
+    };
+    Some(Cow::Borrowed(parser.packet_bytes(side)))
+}
+
+// Same as "parse_packet"
+#[inline(always)]
+fn on_message(mut message: ChatMessage<'_>) -> Option<Vec<u8>> {
+    info!("The local player just typed '{}'", message.message);
+    if message.message == "Hello, world!" {
+        info!("Spoofing with the custom message");
+        message.message = "!dlrow ,olleH";
+        return Some(encode(&message))
+    };
+    None
 }
 
 /// Recovers the original destination of a redirected connection.
@@ -147,7 +159,7 @@ impl Connector {
 /// ownership, so it is wrapped in `ManuallyDrop` to stop it closing a
 /// descriptor that `stream` still uses. A plain `mem::forget` would leak the
 /// descriptor on the `?` path below.
-#[inline]
+#[inline(always)]
 fn stream_to_target_addr(stream: &TcpStream) -> eyre::Result<SockAddr> {
     let fd = stream.as_raw_fd();
     let socket = std::mem::ManuallyDrop::new(unsafe { socket2::Socket::from_raw_fd(fd) });
