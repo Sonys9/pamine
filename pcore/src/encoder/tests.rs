@@ -7,9 +7,10 @@
 use crate::decoder::{Decoder, NbtTag, Slot, VarInt, VarLong};
 use crate::{Decode, Encode};
 
+use super::Encoder;
 use super::frame::packet_frame;
-use super::string::{bytes, string, write_string};
-use super::varint::{varint, varlong, write_varint};
+use super::string::{bytes, string};
+use super::varint::{varint, varlong};
 
 #[test]
 fn varint_roundtrip_positive() {
@@ -72,91 +73,55 @@ fn packet_frame_roundtrip() {
 }
 
 #[test]
-fn write_helpers_append() {
-    let mut out = vec![0xAA];
-    write_varint(&mut out, 300);
-    write_string(&mut out, "hi");
-    assert_eq!(out, vec![0xAA, 0xac, 0x02, 0x02, b'h', b'i']);
+fn encoder_cursor_methods() {
+    let mut encoder = Encoder::new();
+    assert!(encoder.is_empty());
+    assert_eq!(encoder.len(), 0);
+
+    encoder.varint(300);
+    encoder.string("hi");
+    assert_eq!(encoder.len(), 5);
+    assert!(!encoder.is_empty());
+    assert_eq!(encoder.as_slice(), &[0xac, 0x02, 0x02, b'h', b'i']);
+
+    encoder.clear();
+    assert!(encoder.is_empty());
+
+    encoder.bool(true);
+    assert_eq!(encoder.into_bytes(), vec![0x01]);
 }
 
 #[test]
-fn nbt_roundtrip_compound() {
-    let tag = NbtTag::Compound(vec![
-        ("a", NbtTag::Byte(1)),
-        ("b", NbtTag::Int(256)),
-        ("c", NbtTag::String("hi")),
-    ]);
-    let mut out = Vec::new();
-    tag.encode(&mut out);
-
-    let mut d = Decoder::new(&out);
-    assert_eq!(d.nbt().unwrap(), tag);
-    assert_eq!(d.remaining(), 0);
+fn encoder_with_capacity() {
+    let encoder = Encoder::with_capacity(64);
+    assert!(encoder.is_empty());
+    assert_eq!(encoder.into_bytes(), Vec::<u8>::new());
 }
 
 #[test]
-fn nbt_roundtrip_arrays() {
-    for tag in [
-        NbtTag::ByteArray(&[1, 2, 3]),
-        NbtTag::IntArray(vec![1, -2, 3]),
-        NbtTag::LongArray(vec![1, -2, 3]),
-        NbtTag::List(vec![NbtTag::Int(1), NbtTag::Int(2)]),
-        NbtTag::List(vec![]),
-        NbtTag::End,
-    ] {
-        let mut out = Vec::new();
-        tag.encode(&mut out);
-        let mut d = Decoder::new(&out);
-        assert_eq!(d.nbt().unwrap(), tag, "failed for {tag:?}");
-        assert_eq!(d.remaining(), 0, "trailing bytes for {tag:?}");
-    }
+fn encoder_raw_writes_no_prefix() {
+    let mut encoder = Encoder::new();
+    encoder.raw(&[1, 2, 3]);
+    assert_eq!(encoder.into_bytes(), vec![1, 2, 3]);
 }
 
 #[test]
-fn slot_roundtrip() {
-    let slot = Slot {
-        present: true,
-        item_id: Some(VarInt::new(5)),
-        count: Some(3),
-        nbt: Some(NbtTag::End),
-    };
-    let mut out = Vec::new();
-    slot.encode(&mut out);
+fn encoder_scalar_methods() {
+    let mut encoder = Encoder::new();
+    encoder.i8(-128);
+    encoder.u8(255);
+    encoder.bool(true);
+    encoder.i16(-32768);
+    encoder.u16(65535);
+    encoder.i32(i32::MIN);
+    encoder.u32(u32::MAX);
+    encoder.i64(i64::MIN);
+    encoder.u64(u64::MAX);
+    encoder.f32(3.5);
+    encoder.f64(-1.25);
 
-    let mut d = Decoder::new(&out);
-    let decoded = Slot::decode(&mut d).unwrap();
-    assert_eq!(decoded, slot);
-    assert_eq!(d.remaining(), 0);
-}
-
-#[test]
-fn empty_slot_roundtrip() {
-    let slot = Slot::empty();
-    let mut out = Vec::new();
-    slot.encode(&mut out);
-    assert_eq!(out, vec![0]);
-
-    let mut d = Decoder::new(&out);
-    assert_eq!(Slot::decode(&mut d).unwrap(), slot);
-}
-
-#[test]
-fn scalar_roundtrip() {
-    // Every fixed-width scalar must survive a write/read cycle.
-    let mut out = Vec::new();
-    (-128i8).encode(&mut out);
-    255u8.encode(&mut out);
-    true.encode(&mut out);
-    (-32768i16).encode(&mut out);
-    65535u16.encode(&mut out);
-    i32::MIN.encode(&mut out);
-    u32::MAX.encode(&mut out);
-    i64::MIN.encode(&mut out);
-    u64::MAX.encode(&mut out);
-    3.5f32.encode(&mut out);
-    (-1.25f64).encode(&mut out);
-
-    let mut d = Decoder::new(&out);
+    let bytes = encoder.into_bytes();
+    let mut d = Decoder::new(&bytes);
     assert_eq!(d.i8().unwrap(), -128);
     assert_eq!(d.u8().unwrap(), 255);
     assert!(d.bool().unwrap());
@@ -172,26 +137,98 @@ fn scalar_roundtrip() {
 }
 
 #[test]
-fn option_roundtrip() {
-    let mut out = Vec::new();
-    Some(VarInt::new(7)).encode(&mut out);
-    None::<VarInt>.encode(&mut out);
+fn nbt_roundtrip_compound() {
+    let tag = NbtTag::Compound(vec![
+        ("a", NbtTag::Byte(1)),
+        ("b", NbtTag::Int(256)),
+        ("c", NbtTag::String("hi")),
+    ]);
+    let mut encoder = Encoder::new();
+    encoder.nbt(&tag);
 
-    let mut d = Decoder::new(&out);
-    assert_eq!(d.bool().unwrap(), true);
+    let bytes = encoder.into_bytes();
+    let mut d = Decoder::new(&bytes);
+    assert_eq!(d.nbt().unwrap(), tag);
+    assert_eq!(d.remaining(), 0);
+}
+
+#[test]
+fn nbt_roundtrip_arrays() {
+    for tag in [
+        NbtTag::ByteArray(&[1, 2, 3]),
+        NbtTag::IntArray(vec![1, -2, 3]),
+        NbtTag::LongArray(vec![1, -2, 3]),
+        NbtTag::List(vec![NbtTag::Int(1), NbtTag::Int(2)]),
+        NbtTag::List(vec![]),
+        NbtTag::End,
+    ] {
+        let mut encoder = Encoder::new();
+        encoder.nbt(&tag);
+
+        let bytes = encoder.into_bytes();
+        let mut d = Decoder::new(&bytes);
+        assert_eq!(d.nbt().unwrap(), tag, "failed for {tag:?}");
+        assert_eq!(d.remaining(), 0, "trailing bytes for {tag:?}");
+    }
+}
+
+#[test]
+fn slot_roundtrip() {
+    let slot = Slot {
+        present: true,
+        item_id: Some(VarInt::new(5)),
+        count: Some(3),
+        nbt: Some(NbtTag::End),
+    };
+    let mut encoder = Encoder::new();
+    encoder.slot(&slot);
+
+    let bytes = encoder.into_bytes();
+    let mut d = Decoder::new(&bytes);
+    let decoded = Slot::decode(&mut d).unwrap();
+    assert_eq!(decoded, slot);
+    assert_eq!(d.remaining(), 0);
+}
+
+#[test]
+fn empty_slot_roundtrip() {
+    let slot = Slot::empty();
+    let mut encoder = Encoder::new();
+    encoder.slot(&slot);
+    assert_eq!(encoder.into_bytes(), vec![0]);
+
+    let bytes = bytes_of(&slot);
+    let mut d = Decoder::new(&bytes);
+    assert_eq!(Slot::decode(&mut d).unwrap(), slot);
+}
+
+/// Encodes any `Encode` value into a fresh `Vec`.
+fn bytes_of<T: Encode + ?Sized>(value: &T) -> Vec<u8> {
+    crate::encode(value)
+}
+
+#[test]
+fn option_roundtrip() {
+    let mut encoder = Encoder::new();
+    encoder.encode(&Some(VarInt::new(7)));
+    encoder.encode(&None::<VarInt>);
+
+    let bytes = encoder.into_bytes();
+    let mut d = Decoder::new(&bytes);
+    assert!(d.bool().unwrap());
     assert_eq!(d.varint().unwrap().get(), 7);
-    assert_eq!(d.bool().unwrap(), false);
+    assert!(!d.bool().unwrap());
     assert_eq!(d.remaining(), 0);
 }
 
 #[test]
 fn vec_roundtrip() {
-    let mut out = Vec::new();
-    vec![VarInt::new(1), VarInt::new(2)].encode(&mut out);
+    let mut encoder = Encoder::new();
+    encoder.encode(&vec![VarInt::new(1), VarInt::new(2)]);
 
-    let mut d = Decoder::new(&out);
-    let count = d.varint().unwrap().get();
-    assert_eq!(count, 2);
+    let bytes = encoder.into_bytes();
+    let mut d = Decoder::new(&bytes);
+    assert_eq!(d.varint().unwrap().get(), 2);
     assert_eq!(d.varint().unwrap().get(), 1);
     assert_eq!(d.varint().unwrap().get(), 2);
     assert_eq!(d.remaining(), 0);
@@ -199,10 +236,11 @@ fn vec_roundtrip() {
 
 #[test]
 fn varlong_type_roundtrip() {
-    let mut out = Vec::new();
-    VarLong::new(i64::MIN).encode(&mut out);
+    let mut encoder = Encoder::new();
+    encoder.encode(&VarLong::new(i64::MIN));
 
-    let mut d = Decoder::new(&out);
+    let bytes = encoder.into_bytes();
+    let mut d = Decoder::new(&bytes);
     assert_eq!(d.varlong().unwrap().get(), i64::MIN);
     assert_eq!(d.remaining(), 0);
 }

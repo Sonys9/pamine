@@ -50,13 +50,13 @@ pub fn varlong(number: i64) -> Vec<u8> {
 }
 
 impl crate::Encode for VarInt {
-    fn encode(&self, out: &mut Vec<u8>) {
-        write_varint(out, self.get());
+    fn encode(&self, encoder: &mut crate::encoder::Encoder) {
+        encoder.varint(self.get());
     }
 }
 
 impl crate::Encode for VarLong {
-    fn encode(&self, out: &mut Vec<u8>) {
-        write_varlong(out, self.get());
+    fn encode(&self, encoder: &mut crate::encoder::Encoder) {
+        encoder.varlong(self.get());
     }
 }

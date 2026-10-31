@@ -9,20 +9,19 @@ use crate::decoder::NbtTag;
 
 use super::string::write_string_u16;
 
-impl crate::Encode for NbtTag<'_> {
-    fn encode(&self, out: &mut Vec<u8>) {
-        // A root tag carries an empty name in 1.19.2.
-        encode_named(out, "", self);
-    }
+/// Appends an NBT tag, including the 1.19.2 root name.
+pub fn write_nbt(out: &mut Vec<u8>, tag: &NbtTag<'_>) {
+    // A root tag carries an empty name in 1.19.2.
+    write_named(out, "", tag);
 }
 
 /// Writes one named NBT tag: type id, `u16` name length, name, payload.
-fn encode_named(out: &mut Vec<u8>, name: &str, tag: &NbtTag<'_>) {
+fn write_named(out: &mut Vec<u8>, name: &str, tag: &NbtTag<'_>) {
     out.push(tag_id(tag));
     if !matches!(tag, NbtTag::End) {
         write_string_u16(out, name);
     }
-    encode_payload(out, tag);
+    write_payload(out, tag);
 }
 
 /// The wire type id of a tag.
@@ -45,7 +44,7 @@ fn tag_id(tag: &NbtTag<'_>) -> u8 {
 }
 
 /// Writes a tag's payload, without the type id and name.
-fn encode_payload(out: &mut Vec<u8>, tag: &NbtTag<'_>) {
+fn write_payload(out: &mut Vec<u8>, tag: &NbtTag<'_>) {
     match tag {
         NbtTag::End => {}
         NbtTag::Byte(v) => out.push(*v as u8),
@@ -65,12 +64,12 @@ fn encode_payload(out: &mut Vec<u8>, tag: &NbtTag<'_>) {
             out.push(elem);
             out.extend_from_slice(&(items.len() as i32).to_be_bytes());
             for item in items {
-                encode_payload(out, item);
+                write_payload(out, item);
             }
         }
         NbtTag::Compound(entries) => {
             for (name, value) in entries {
-                encode_named(out, name, value);
+                write_named(out, name, value);
             }
             out.push(0); // TAG_End terminates the compound
         }
@@ -86,5 +85,11 @@ fn encode_payload(out: &mut Vec<u8>, tag: &NbtTag<'_>) {
                 out.extend_from_slice(&v.to_be_bytes());
             }
         }
+    }
+}
+
+impl crate::Encode for NbtTag<'_> {
+    fn encode(&self, encoder: &mut crate::encoder::Encoder) {
+        encoder.nbt(self);
     }
 }

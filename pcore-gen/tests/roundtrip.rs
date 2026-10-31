@@ -6,6 +6,7 @@
 //! bug that desynchronises a packet stream.
 
 use pcore::decoder::{Decoder, NbtTag, Slot, Uuid, VarInt, VarLong};
+use pcore::encoder::Encoder;
 use pcore::{Decode, Encode as EncodeTrait};
 use pcore_gen::{DecodePacket, Encode, EncodePacket};
 
@@ -18,8 +19,9 @@ fn roundtrip<T>(value: &T)
 where
     T: EncodeTrait + for<'a> Decode<'a> + PartialEq + std::fmt::Debug,
 {
-    let mut bytes = Vec::new();
-    value.encode(&mut bytes);
+    let mut encoder = Encoder::new();
+    value.encode(&mut encoder);
+    let bytes = encoder.into_bytes();
 
     let mut decoder = Decoder::new(&bytes);
     let decoded = T::decode(&mut decoder).expect("decode failed");
@@ -135,8 +137,9 @@ fn uuid_roundtrip() {
     let value = WithUuid {
         uuid: Uuid::new([0xAB; 16]),
     };
-    let mut bytes = Vec::new();
-    value.encode(&mut bytes);
+    let mut encoder = Encoder::new();
+    value.encode(&mut encoder);
+    let bytes = encoder.into_bytes();
     assert_eq!(bytes, vec![0xAB; 16]);
 
     let mut decoder = Decoder::new(&bytes);
@@ -157,8 +160,9 @@ fn borrowed_roundtrip() {
         name: "hello",
         payload: &[1, 2, 3],
     };
-    let mut bytes = Vec::new();
-    value.encode(&mut bytes);
+    let mut encoder = Encoder::new();
+    value.encode(&mut encoder);
+    let bytes = encoder.into_bytes();
 
     let mut decoder = Decoder::new(&bytes);
     let decoded = WithBorrowed::decode(&mut decoder).unwrap();
@@ -184,8 +188,9 @@ fn nbt_roundtrip() {
             ("e", NbtTag::List(vec![NbtTag::Int(1), NbtTag::Int(2)])),
         ]),
     };
-    let mut bytes = Vec::new();
-    value.encode(&mut bytes);
+    let mut encoder = Encoder::new();
+    value.encode(&mut encoder);
+    let bytes = encoder.into_bytes();
 
     let mut decoder = Decoder::new(&bytes);
     let decoded = WithNbt::decode(&mut decoder).unwrap();
@@ -210,8 +215,9 @@ fn slot_roundtrip() {
         Slot::empty(),
     ] {
         let value = WithSlot { slot };
-        let mut bytes = Vec::new();
-        value.encode(&mut bytes);
+        let mut encoder = Encoder::new();
+        value.encode(&mut encoder);
+        let bytes = encoder.into_bytes();
 
         let mut decoder = Decoder::new(&bytes);
         let decoded = WithSlot::decode(&mut decoder).unwrap();
@@ -227,8 +233,9 @@ fn packet_enum_roundtrip() {
         Packet::Empty,
         Packet::Struct { x: 1, y: -2 },
     ] {
-        let mut bytes = Vec::new();
-        value.encode(&mut bytes);
+        let mut encoder = Encoder::new();
+        value.encode(&mut encoder);
+        let bytes = encoder.into_bytes();
 
         // The opcode is the first VarInt; the body follows.
         let mut decoder = Decoder::new(&bytes);
@@ -242,12 +249,14 @@ fn packet_enum_roundtrip() {
 
 #[test]
 fn packet_enum_writes_opcode_first() {
-    let mut bytes = Vec::new();
-    Packet::Simple(0).encode(&mut bytes);
+    let mut encoder = Encoder::new();
+    Packet::Simple(0).encode(&mut encoder);
+    let bytes = encoder.into_bytes();
     assert_eq!(bytes[0], 0x00, "opcode must come first");
 
-    let mut bytes = Vec::new();
-    Packet::Struct { x: 0, y: 0 }.encode(&mut bytes);
+    let mut encoder = Encoder::new();
+    Packet::Struct { x: 0, y: 0 }.encode(&mut encoder);
+    let bytes = encoder.into_bytes();
     assert_eq!(bytes[0], 0x02, "opcode must come first");
 }
 
@@ -261,13 +270,14 @@ fn encode_matches_known_wire_bytes() {
         b: bool,
     }
 
-    let mut bytes = Vec::new();
+    let mut encoder = Encoder::new();
     Fixture {
         n: VarInt::new(300),
         s: "hi",
         b: true,
     }
-    .encode(&mut bytes);
+    .encode(&mut encoder);
+    let bytes = encoder.into_bytes();
 
     assert_eq!(bytes, vec![0xAC, 0x02, 0x02, b'h', b'i', 0x01]);
 }

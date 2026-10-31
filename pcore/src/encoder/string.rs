@@ -40,20 +40,20 @@ pub fn bytes(value: &[u8]) -> Vec<u8> {
 }
 
 impl crate::Encode for str {
-    fn encode(&self, out: &mut Vec<u8>) {
-        write_string(out, self);
+    fn encode(&self, encoder: &mut crate::encoder::Encoder) {
+        encoder.string(self);
     }
 }
 
 impl crate::Encode for String {
-    fn encode(&self, out: &mut Vec<u8>) {
-        write_string(out, self);
+    fn encode(&self, encoder: &mut crate::encoder::Encoder) {
+        encoder.string(self);
     }
 }
 
 impl crate::Encode for [u8] {
-    fn encode(&self, out: &mut Vec<u8>) {
-        write_bytes(out, self);
+    fn encode(&self, encoder: &mut crate::encoder::Encoder) {
+        encoder.bytes(self);
     }
 }
 
@@ -62,26 +62,26 @@ impl crate::Encode for [u8] {
 /// This is what lets the derive macro pass `&self.field` for every field
 /// without caring whether the field is already a reference.
 impl<T: crate::Encode + ?Sized> crate::Encode for &T {
-    fn encode(&self, out: &mut Vec<u8>) {
-        (**self).encode(out);
+    fn encode(&self, encoder: &mut crate::encoder::Encoder) {
+        (**self).encode(encoder);
     }
 }
 
 impl<T: crate::Encode + ?Sized> crate::Encode for &mut T {
-    fn encode(&self, out: &mut Vec<u8>) {
-        (**self).encode(out);
+    fn encode(&self, encoder: &mut crate::encoder::Encoder) {
+        (**self).encode(encoder);
     }
 }
 
 /// A boolean-gated value: `1` then the payload, or a lone `0`.
 impl<T: crate::Encode> crate::Encode for Option<T> {
-    fn encode(&self, out: &mut Vec<u8>) {
+    fn encode(&self, encoder: &mut crate::encoder::Encoder) {
         match self {
             Some(value) => {
-                out.push(1);
-                value.encode(out);
+                encoder.bool(true);
+                value.encode(encoder);
             }
-            None => out.push(0),
+            None => encoder.bool(false),
         }
     }
 }
@@ -91,10 +91,10 @@ impl<T: crate::Encode> crate::Encode for Option<T> {
 /// This also covers `Vec<u8>`, which is the same wire shape as a byte array —
 /// a VarInt length followed by the bytes.
 impl<T: crate::Encode> crate::Encode for Vec<T> {
-    fn encode(&self, out: &mut Vec<u8>) {
-        write_varint(out, self.len() as i32);
+    fn encode(&self, encoder: &mut crate::encoder::Encoder) {
+        encoder.varint(self.len() as i32);
         for value in self {
-            value.encode(out);
+            value.encode(encoder);
         }
     }
 }
