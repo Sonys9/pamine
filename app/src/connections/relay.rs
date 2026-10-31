@@ -9,7 +9,7 @@ use tokio::{
 };
 use tracing::error;
 
-use crate::packets::{Parser, Side, frame_packet};
+use crate::packets::{Parser, Side};
 
 use super::testing_will_be_removed::on_packet;
 
@@ -61,9 +61,11 @@ pub async fn connection_side(
 /// Returns `None` when the buffer holds only a partial packet, in which case
 /// the caller should read more bytes and retry.
 ///
-/// The returned bytes are always a complete *frame* (`len:VarInt
-/// [data_len:VarInt] body`), never a bare body: the peer reads frames, so a
-/// body without a length prefix desynchronises the stream.
+/// The returned bytes are always complete *frames* (`len:VarInt
+/// [data_len:VarInt] body`), never bare bodies: the peer reads frames, so a
+/// body without a length prefix desynchronises the stream. A rewrite may emit
+/// several frames back to back — TCP is a byte stream, so the peer reads them
+/// one at a time, and one `write_all` is cheaper than one syscall per packet.
 fn parse_packet<'a>(
     parser: &'a mut MutexGuard<'_, Parser>,
     side: Side,
@@ -77,12 +79,8 @@ fn parse_packet<'a>(
         // wait for the next read instead of logging an error.
         Ok(None) => return None,
         Ok(Some(packet)) => {
-            if let Some(body) = on_packet(&packet) {
-                // `body` is opcode + fields only, so it still needs framing.
-                match frame_packet(&body, threshold) {
-                    Ok(framed) => return Some(Cow::Owned(framed)),
-                    Err(e) => error!("[{:?}] failed to frame the spoofed packet: {}", side, e),
-                }
+            if let Some(framed) = on_packet(&packet, threshold) {
+                return Some(Cow::Owned(framed));
             };
         }
         Err(e) => {
