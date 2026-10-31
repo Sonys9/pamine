@@ -8,10 +8,13 @@
 //! `data_len == 0` means the body is stored uncompressed even though
 //! compression is enabled.
 
-use std::io::Read;
+use std::io::{Read, Write};
 
-use flate2::read::ZlibDecoder;
-use pcore::decoder::Decoder;
+use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
+use pcore::{
+    decoder::Decoder,
+    encoder::{packet_frame, write_varint},
+};
 
 /// One framed packet, still pointing into the receive buffer.
 pub struct Frame<'a> {
@@ -80,4 +83,46 @@ impl<'a> Frame<'a> {
 pub fn inflate(payload: &[u8], out: &mut Vec<u8>) -> eyre::Result<usize> {
     let mut decoder = ZlibDecoder::new(payload);
     Ok(decoder.read_to_end(out)?)
+}
+
+/// Compresses `payload` with zlib.
+pub fn deflate(payload: &[u8]) -> eyre::Result<Vec<u8>> {
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(payload)?;
+    Ok(encoder.finish()?)
+}
+
+/// Wraps a packet body (opcode + fields) into a frame, honouring compression.
+///
+/// This is the write-side counterpart of [`Frame::split`]. `threshold` is the
+/// value the server sent in `Set Compression`:
+///
+/// - `None` — the connection is uncompressed, so the frame is just
+///   `len:VarInt body`.
+/// - `Some(n)` — every frame carries a `data_len:VarInt` header. Bodies of at
+///   least `n` bytes are zlib-compressed and `data_len` is their uncompressed
+///   size; shorter bodies are stored as-is with `data_len = 0`.
+///
+/// A packet written without this header on a compressed connection is read by
+/// the peer as a bogus `data_len` and the connection is dropped.
+pub fn frame_packet(body: &[u8], threshold: Option<i32>) -> eyre::Result<Vec<u8>> {
+    let Some(threshold) = threshold else {
+        return Ok(packet_frame(body));
+    };
+
+    // `data_len` is the uncompressed size, or 0 when the body is stored raw.
+    let mut inner = Vec::with_capacity(body.len() + 5);
+    if body.len() >= threshold.max(0) as usize {
+        let compressed = deflate(body)?;
+        write_varint(&mut inner, body.len() as i32);
+        inner.extend_from_slice(&compressed);
+    } else {
+        write_varint(&mut inner, 0);
+        inner.extend_from_slice(body);
+    }
+
+    let mut out = Vec::with_capacity(inner.len() + 5);
+    write_varint(&mut out, inner.len() as i32);
+    out.extend_from_slice(&inner);
+    Ok(out)
 }

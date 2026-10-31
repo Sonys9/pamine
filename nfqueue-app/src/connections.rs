@@ -2,7 +2,7 @@ use std::{
     borrow::Cow, net::SocketAddr, os::fd::{AsRawFd, FromRawFd}, sync::Arc, time::Duration,
 };
 
-use pcore::{Encode, encode};
+use pcore::{Encode, encoder::Encoder};
 use socket2::{Domain, SockAddr, Type};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt}, net::{
@@ -16,6 +16,7 @@ use crate::packets::{
     Packet::C2S,
     Parser, Side,
     c2s::{self, packets::C2SPacket, play::ChatMessage},
+    frame_packet,
 };
 
 pub const UNAVAILABLE_ERR: i32 = 115;
@@ -117,16 +118,26 @@ impl Connector {
 // Moved this code to the fn to decrease the nesting
 #[inline(always)]
 fn parse_packet<'a>(parser: &'a mut MutexGuard<'_, Parser>, side: Side, buffer: &[u8]) -> Option<Cow<'a, [u8]>> {
+    // Read the threshold before `try_parse` borrows the parser: a hand-built
+    // frame has to carry the same `data_len` header the peer expects.
+    let threshold = parser.threshold();
     match parser.try_parse(side) {
         // `None` means the buffer holds only a partial packet;
         // wait for the next read instead of logging an error.
         Ok(None) => return None,
         Ok(Some(packet)) => {
-            if 
+            if
                 let C2S(C2SPacket::Play(c2s::play::Play::ChatMessage(message))) = packet
-                && let Some(new_packet) = on_message(message)
+                && let Some(body) = on_message(message)
             {
-                return Some(Cow::Owned(new_packet));
+                // `body` is opcode + fields only. The peer reads a *frame*:
+                // `len:VarInt [data_len:VarInt] body`, so it has to be wrapped
+                // here. Sending the bare body makes the server read the first
+                // field as a length and drop the connection.
+                match frame_packet(&body, threshold) {
+                    Ok(framed) => return Some(Cow::Owned(framed)),
+                    Err(e) => error!("[{:?}] failed to frame the spoofed packet: {}", side, e),
+                }
             };
         }
         Err(e) => {
@@ -141,14 +152,25 @@ fn parse_packet<'a>(parser: &'a mut MutexGuard<'_, Parser>, side: Side, buffer: 
     Some(Cow::Borrowed(parser.packet_bytes(side)))
 }
 
-// Same as "parse_packet"
+/// Builds a replacement packet body (opcode + fields) for a chat message.
+///
+/// Returns `None` to forward the original packet untouched. The result is
+/// *not* framed — [`parse_packet`] adds the length prefix and the compression
+/// header, because only it knows the current threshold.
 #[inline(always)]
 fn on_message(mut message: ChatMessage<'_>) -> Option<Vec<u8>> {
     info!("The local player just typed '{}'", message.message);
     if message.message == "Hello, world!" {
         info!("Spoofing with the custom message");
+        info!("Before: {:?}", message);
         message.message = "!dlrow ,olleH";
-        return Some(encode(&message))
+        info!("After: {:?}", message);
+
+        // The opcode is not part of `ChatMessage`, so it is written by hand.
+        let mut encoder = Encoder::with_capacity(64);
+        encoder.varint(0x05); // Chat Message
+        message.encode(&mut encoder);
+        return Some(encoder.into_bytes());
     };
     None
 }

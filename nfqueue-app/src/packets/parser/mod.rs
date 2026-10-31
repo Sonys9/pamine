@@ -16,13 +16,14 @@
 //! [`ParseResult`]: state::ParseResult
 
 mod dispatch;
-mod frame;
+pub mod frame;
 mod state;
 mod stream;
 
 #[cfg(test)]
 mod tests;
 
+pub use frame::frame_packet;
 pub use state::{ParseResult, Side, State};
 pub use stream::StreamData;
 
@@ -125,7 +126,16 @@ impl Parser {
     /// Returns parsed packet's bytes
     pub fn packet_bytes(&mut self, side: Side) -> &[u8] {
         let stream_data = self.stream_mut(side);
-        &stream_data.buffer.buffer[stream_data.diff..]
+        &stream_data.buffer.buffer[..stream_data.diff]
+    }
+
+    /// The compression threshold currently in effect.
+    ///
+    /// `None` while compression is disabled. Needed by callers that build a
+    /// packet themselves: a hand-made frame must carry the same `data_len`
+    /// header the peer expects.
+    pub fn threshold(&self) -> Option<i32> {
+        self.threshold
     }
     
     /// Drops already-parsed bytes and rewinds the read cursor.
