@@ -1,7 +1,7 @@
 //! Positive tests - these should compile successfully
 
-use pcore_gen::{Decode, DecodePacket};
-use pcore::decoder::{NbtTag, VarInt, VarLong, Uuid};
+use pcore::decoder::{NbtTag, Uuid, VarInt, VarLong};
+use pcore_gen::{Decode, DecodePacket, Encode, EncodePacket};
 
 // Test basic struct with primitive types (only those supported by decoder)
 #[derive(Decode)]
@@ -139,6 +139,115 @@ enum PacketEnumMultipleUnits {
     Pong,
     #[id(102)]
     Disconnect,
+}
+
+// ---------------------------------------------------------------------------
+// Encode
+// ---------------------------------------------------------------------------
+
+// Every primitive the decoder supports must also be encodable.
+#[derive(Encode)]
+struct EncodeBasic {
+    a: i8,
+    b: u8,
+    c: bool,
+    d: i16,
+    e: u16,
+    f: i32,
+    g: u32,
+    h: i64,
+    i: u64,
+    j: f32,
+    k: f64,
+}
+
+#[derive(Encode)]
+struct EncodeWithOption {
+    required: i32,
+    optional: Option<i32>,
+}
+
+#[derive(Encode)]
+struct EncodeWithSlice<'a> {
+    data: &'a [u8],
+    count: VarInt,
+}
+
+#[derive(Encode)]
+struct EncodeWithSpecialTypes {
+    varint: VarInt,
+    varlong: VarLong,
+    uuid: Uuid,
+}
+
+#[derive(Encode)]
+struct EncodeUnit;
+
+#[derive(Encode)]
+struct EncodeTuple(i32);
+
+#[derive(Encode)]
+struct EncodeMultiTuple(i32, i64, bool);
+
+#[derive(Encode)]
+struct EncodeWithOwned<'a> {
+    name: &'a str,
+    data: Vec<u8>,
+}
+
+#[derive(Encode)]
+struct EncodeWithString {
+    owned: String,
+}
+
+#[derive(Encode)]
+struct EncodeWithNbt<'a> {
+    id: VarInt,
+    data: NbtTag<'a>,
+}
+
+// `#[encode(rest)]` writes the raw bytes with no length prefix.
+#[derive(Encode)]
+struct EncodeWithRest<'a> {
+    channel: &'a str,
+    #[encode(rest)]
+    payload: &'a [u8],
+}
+
+// `#[encode(len = "field")]` also writes raw bytes.
+#[derive(Encode)]
+struct EncodeWithLen<'a> {
+    size: VarInt,
+    #[encode(len = "size")]
+    payload: &'a [u8],
+}
+
+// EncodePacket: unit, single-field and struct variants.
+#[derive(EncodePacket)]
+enum EncodePacketEnum {
+    #[id(0)]
+    Variant1(i32),
+    #[id(1)]
+    Variant2,
+    #[id(2)]
+    Variant3(VarInt),
+}
+
+#[derive(EncodePacket)]
+enum EncodePacketStructVariant {
+    #[id(10)]
+    Simple(i32),
+    #[id(11)]
+    Complex { x: i32, y: i64 },
+    #[id(12)]
+    Empty,
+}
+
+// A type can derive both directions.
+#[derive(Decode, Encode)]
+struct BothDirections {
+    id: VarInt,
+    flag: bool,
 }
 
 fn main() {

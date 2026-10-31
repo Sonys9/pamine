@@ -14,4 +14,20 @@ impl<'a> Decode<'a> for decoder::NbtTag<'a> {
     }
 }
 
-pub use pcore_gen::Decode;
+/// Writes a value into a packet body.
+///
+/// The mirror of [`Decode`]: every type that can be read off the wire can be
+/// written back. Implementations append to `out` instead of returning a fresh
+/// `Vec`, so encoding a struct with many fields does not allocate per field.
+pub trait Encode {
+    fn encode(&self, out: &mut Vec<u8>);
+}
+
+/// Encodes a value into a fresh `Vec`.
+pub fn encode<T: Encode + ?Sized>(value: &T) -> Vec<u8> {
+    let mut out = Vec::new();
+    value.encode(&mut out);
+    out
+}
+
+pub use pcore_gen::{Decode, Encode};

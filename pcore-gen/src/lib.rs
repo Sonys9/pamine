@@ -39,6 +39,159 @@ fn expand_decode(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     })
 }
 
+/// Proc macro derive for encoding structs into a byte buffer.
+///
+/// The mirror of [`Decode`]. Generated implementation:
+/// ```text
+/// impl ::pcore::Encode for MyStruct {
+///     fn encode(&self, out: &mut Vec<u8>) {
+///         ::pcore::Encode::encode(&self.field1, out);
+///         ::pcore::Encode::encode(&self.field2, out);
+///     }
+/// }
+/// ```
+#[proc_macro_derive(Encode, attributes(encode))]
+pub fn derive_encode(stream: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(stream as DeriveInput);
+    match expand_encode(&input) {
+        Ok(tokens) => tokens.into(),
+        Err(e) => e.to_compile_error().into(),
+    }
+}
+
+fn expand_encode(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
+    let name = &input.ident;
+    let body = process_struct_encode(&input.data)?;
+
+    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+
+    Ok(quote! {
+        impl #impl_generics ::pcore::Encode for #name #ty_generics #where_clause {
+            fn encode(&self, out: &mut Vec<u8>) {
+                #body
+            }
+        }
+    })
+}
+
+/// Proc macro derive for encoding packet enums by opcode.
+///
+/// The mirror of [`DecodePacket`]. Generated implementation:
+/// ```text
+/// impl MyEnum {
+///     pub fn encode(&self, out: &mut Vec<u8>) {
+///         match self {
+///             Self::Variant1(inner) => {
+///                 ::pcore::encoder::write_varint(out, 0);
+///                 ::pcore::Encode::encode(inner, out);
+///             }
+///             ...
+///         }
+///     }
+/// }
+/// ```
+#[proc_macro_derive(EncodePacket, attributes(id))]
+pub fn derive_encode_packet(stream: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(stream as DeriveInput);
+    match expand_encode_packet(&input) {
+        Ok(tokens) => tokens.into(),
+        Err(e) => e.to_compile_error().into(),
+    }
+}
+
+fn expand_encode_packet(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
+    let name = &input.ident;
+
+    let Data::Enum(data_enum) = &input.data else {
+        return Err(syn::Error::new_spanned(
+            &input.ident,
+            "EncodePacket derive requires an enum",
+        ));
+    };
+
+    let mut match_arms = Vec::new();
+    let mut seen: HashMap<String, String> = HashMap::new();
+
+    for variant in &data_enum.variants {
+        let variant_name = &variant.ident;
+
+        let opcode = variant
+            .attrs
+            .iter()
+            .find(|attr| attr.path().is_ident("id"))
+            .and_then(|attr| match &attr.meta {
+                Meta::List(list) => Some(list.tokens.clone()),
+                _ => None,
+            })
+            .ok_or_else(|| {
+                syn::Error::new_spanned(
+                    variant_name,
+                    format!("variant `{variant_name}` is missing a #[id(N)] attribute"),
+                )
+            })?;
+
+        let key = opcode.to_string();
+        if let Some(previous) = seen.insert(key.clone(), variant_name.to_string()) {
+            return Err(syn::Error::new_spanned(
+                variant_name,
+                format!("duplicate #[id({key})]: already used by variant `{previous}`"),
+            ));
+        }
+
+        match &variant.fields {
+            Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
+                match_arms.push(quote! {
+                    Self::#variant_name(inner) => {
+                        ::pcore::encoder::write_varint(out, #opcode);
+                        ::pcore::Encode::encode(inner, out);
+                    }
+                });
+            }
+            Fields::Unit => {
+                match_arms.push(quote! {
+                    Self::#variant_name => {
+                        ::pcore::encoder::write_varint(out, #opcode);
+                    }
+                });
+            }
+            Fields::Named(named) => {
+                let names: Vec<_> = named
+                    .named
+                    .iter()
+                    .map(|field| field.ident.as_ref().expect("named field"))
+                    .collect();
+                match_arms.push(quote! {
+                    Self::#variant_name { #(#names),* } => {
+                        ::pcore::encoder::write_varint(out, #opcode);
+                        #(::pcore::Encode::encode(#names, out);)*
+                    }
+                });
+            }
+            Fields::Unnamed(_) => {
+                return Err(syn::Error::new_spanned(
+                    variant_name,
+                    format!(
+                        "variant `{variant_name}` has multiple unnamed fields; \
+                         use a single field or a struct variant"
+                    ),
+                ));
+            }
+        }
+    }
+
+    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+
+    Ok(quote! {
+        impl #impl_generics ::pcore::Encode for #name #ty_generics #where_clause {
+            fn encode(&self, out: &mut Vec<u8>) {
+                match self {
+                    #(#match_arms)*
+                }
+            }
+        }
+    })
+}
+
 /// Proc macro derive for decoding packet enums by opcode.
 ///
 /// Generated implementation:
@@ -351,10 +504,7 @@ fn process_struct(data: &syn::Data) -> syn::Result<proc_macro2::TokenStream> {
         Fields::Named(fields) => {
             let mut iter = Vec::new();
             for field in &fields.named {
-                let name = field
-                    .ident
-                    .as_ref()
-                    .expect("Struct field must have a name");
+                let name = field.ident.as_ref().expect("Struct field must have a name");
                 let (expr, needs_try) = field_decode(field)?;
                 let expr = if needs_try {
                     quote! { #expr? }
@@ -390,6 +540,100 @@ fn process_struct(data: &syn::Data) -> syn::Result<proc_macro2::TokenStream> {
                 iter.push(quote! { #expr, });
             }
             quote! { Self(#(#iter)*) }
+        }
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Encode
+// ---------------------------------------------------------------------------
+
+/// How a field's bytes are delimited on the wire, for encoding.
+enum EncodeMode {
+    /// Default: the type decides (VarInt prefix for `&[u8]`, etc.).
+    Typed,
+    /// `#[encode(rest)]` — everything up to the end of the packet.
+    Rest,
+    /// `#[encode(len = "field")]` — exactly `field` bytes, no prefix.
+    ///
+    /// The length is implied by the field itself, so the identifier is only
+    /// validated at parse time and not used when emitting code.
+    Len(#[allow(dead_code)] syn::Ident),
+}
+
+/// Parses `#[encode(...)]` on a field.
+fn encode_field_mode(field: &syn::Field) -> syn::Result<EncodeMode> {
+    let Some(attr) = field.attrs.iter().find(|a| a.path().is_ident("encode")) else {
+        return Ok(EncodeMode::Typed);
+    };
+
+    let mut mode = EncodeMode::Typed;
+    attr.parse_nested_meta(|meta| {
+        if meta.path.is_ident("rest") {
+            mode = EncodeMode::Rest;
+            return Ok(());
+        }
+        if meta.path.is_ident("len") {
+            let value = meta.value()?;
+            let lit: syn::LitStr = value.parse()?;
+            let ident = syn::Ident::new(&lit.value(), lit.span());
+            mode = EncodeMode::Len(ident);
+            return Ok(());
+        }
+        Err(meta.error("expected `rest` or `len = \"field\"`"))
+    })?;
+    Ok(mode)
+}
+
+/// Generates the encode statement for one field.
+///
+/// `access` is the expression that yields the field's value, e.g. `&self.name`
+/// or `name` for a destructured enum variant.
+fn field_encode(
+    field: &syn::Field,
+    access: proc_macro2::TokenStream,
+) -> syn::Result<proc_macro2::TokenStream> {
+    Ok(match encode_field_mode(field)? {
+        EncodeMode::Typed => quote! { ::pcore::Encode::encode(#access, out); },
+        // `rest` and `len` both write the raw bytes with no length prefix.
+        EncodeMode::Rest | EncodeMode::Len(_) => {
+            quote! { out.extend_from_slice(#access); }
+        }
+    })
+}
+
+/// Process a struct's fields and generate the encode body.
+fn process_struct_encode(data: &syn::Data) -> syn::Result<proc_macro2::TokenStream> {
+    let struct_ = match data {
+        syn::Data::Struct(s) => s,
+        _ => {
+            return Err(syn::Error::new(
+                proc_macro2::Span::call_site(),
+                "Encode derive requires a struct",
+            ));
+        }
+    };
+
+    Ok(match &struct_.fields {
+        Fields::Named(fields) => {
+            let mut iter = Vec::new();
+            for field in &fields.named {
+                let name = field.ident.as_ref().expect("Struct field must have a name");
+                iter.push(field_encode(field, quote! { &self.#name })?);
+            }
+            quote! { #(#iter)* }
+        }
+        Fields::Unit => quote! {},
+        Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
+            field_encode(&fields.unnamed[0], quote! { &self.0 })?
+        }
+        Fields::Unnamed(fields) => {
+            let mut iter = Vec::new();
+            for (index, field) in fields.unnamed.iter().enumerate() {
+                let index = syn::Index::from(index);
+                iter.push(field_encode(field, quote! { &self.#index })?);
+            }
+            quote! { #(#iter)* }
         }
     })
 }
