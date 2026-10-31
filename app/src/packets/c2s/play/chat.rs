@@ -62,8 +62,16 @@ impl Encode for ArgumentSignature<'_> {
 
 /// `Chat Command` (0x04).
 ///
-/// In 1.19.2 the packet ends after `signed_preview`; the "last seen" and
-/// "last received" arrays only exist on `Chat Message`.
+/// The wiki page for protocol 760 stops at `signed_preview`, but the 1.19.2
+/// client sends two more bytes: `LastSeenMessages.Update` (`offset: VarInt` +
+/// `acknowledged: BitSet`). The server reads them, so a packet without them is
+/// rejected with `IndexOutOfBoundsException: readerIndex(22) + length(1)
+/// exceeds writerIndex(22)`.
+///
+/// The tail is kept as raw bytes rather than modelled field by field: the wiki
+/// does not document it, and a wrong guess would desynchronise the stream just
+/// as badly. `Decoder::rest` captures whatever the client sent, so a round trip
+/// is byte-exact.
 #[derive(Debug, Clone)]
 pub struct ChatCommand<'a> {
     pub command: &'a str,
@@ -71,6 +79,10 @@ pub struct ChatCommand<'a> {
     pub salt: i64,
     pub argument_signatures: Vec<ArgumentSignature<'a>>,
     pub signed_preview: bool,
+    /// `LastSeenMessages.Update`: `offset` + `acknowledged` bitset.
+    ///
+    /// The 1.19.2 client sends `[0, 0]` for an empty acknowledgement.
+    pub last_seen_messages: &'a [u8],
 }
 
 impl<'a> Decode<'a> for ChatCommand<'a> {
@@ -85,12 +97,14 @@ impl<'a> Decode<'a> for ChatCommand<'a> {
             })
         })?;
         let signed_preview = decoder.bool()?;
+        let last_seen_messages = decoder.rest();
         Ok(Self {
             command,
             timestamp,
             salt,
             argument_signatures,
             signed_preview,
+            last_seen_messages,
         })
     }
 }
@@ -102,6 +116,7 @@ impl Encode for ChatCommand<'_> {
         encoder.i64(self.salt);
         encoder.encode(&self.argument_signatures);
         encoder.bool(self.signed_preview);
+        encoder.raw(self.last_seen_messages);
     }
 }
 

@@ -1,9 +1,9 @@
 //! Parser tests: framing, fragmentation and state transitions.
 
-use pcore::{encode, encoder::varint};
+use pcore::{Decode, encode, encoder::varint};
 
 use super::{Parser, Side, State, frame::Frame, frame::inflate, frame_packet};
-use crate::packets::c2s::play::{ChatMessage, Play};
+use crate::packets::c2s::play::{ChatCommand, ChatMessage, Play};
 
 /// Builds an uncompressed frame: `len:VarInt body`.
 fn frame(body: &[u8]) -> Vec<u8> {
@@ -185,6 +185,51 @@ fn encoding_the_enum_writes_the_opcode_from_the_id_attribute() {
 
     let bytes = encode(&packet);
     assert_eq!(bytes[0], 0x05, "opcode must be the first byte");
+}
+
+#[test]
+fn chat_command_tail_is_written_without_a_length_prefix() {
+    // The `last_seen_messages` tail is raw bytes, not a VarInt-prefixed array.
+    // A prefix here would add a byte and the server would read past the end of
+    // the packet (`readerIndex(22) + length(1) exceeds writerIndex(22)`).
+    let command = ChatCommand {
+        command: "?",
+        timestamp: 1,
+        salt: 2,
+        argument_signatures: Vec::new(),
+        signed_preview: false,
+        last_seen_messages: &[0, 0],
+    };
+    let bytes = encode(&Play::ChatCommand(command));
+
+    // opcode(1) + strlen(1) + "?"(1) + ts(8) + salt(8) + count(1) + preview(1)
+    // + tail(2) = 23. A length prefix on the tail would make it 24.
+    assert_eq!(bytes.len(), 23, "unexpected body length: {bytes:?}");
+    assert_eq!(&bytes[bytes.len() - 2..], &[0, 0], "tail must be verbatim");
+}
+
+#[test]
+fn chat_command_round_trips_through_decode() {
+    // Decoding must consume the tail too, otherwise the next packet in the
+    // stream would start two bytes early.
+    let command = ChatCommand {
+        command: "cmd",
+        timestamp: 1793416506394,
+        salt: -2348666467906564851,
+        argument_signatures: Vec::new(),
+        signed_preview: false,
+        last_seen_messages: &[0, 0],
+    };
+    let bytes = encode(&Play::ChatCommand(command));
+
+    let mut decoder = pcore::decoder::Decoder::new(&bytes);
+    let opcode = decoder.varint().unwrap().get();
+    assert_eq!(opcode, 0x04);
+    let decoded = ChatCommand::decode(&mut decoder).unwrap();
+
+    assert_eq!(decoded.command, "cmd");
+    assert_eq!(decoded.last_seen_messages, &[0, 0]);
+    assert_eq!(decoder.remaining(), 0, "tail was not consumed");
 }
 
 #[test]
