@@ -173,17 +173,14 @@ fn decode_type(ty: &Type) -> TokenStream {
 
 /// Extract the inner type from an Option<T> type.
 fn extract_option_inner(ty: &Type) -> Option<Type> {
-    if let Type::Path(path) = ty {
-        if let Some(segment) = path.path.segments.last() {
-            if segment.ident == "Option" {
-                if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
-                    if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
-                        return Some(inner_ty.clone());
-                    }
-                }
-            }
-        }
-    }
+    if let Type::Path(path) = ty 
+        && let Some(segment) = path.path.segments.last() 
+        && segment.ident == "Option"
+        && let syn::PathArguments::AngleBracketed(args) = &segment.arguments
+        && let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() 
+    {
+        return Some(inner_ty.clone())
+    };
     None
 }
 
