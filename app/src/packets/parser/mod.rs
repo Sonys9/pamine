@@ -36,6 +36,7 @@ pub use state::Packet;
 use pcore::decoder::Decoder;
 
 use frame::{Frame, inflate};
+use tracing::error;
 
 use crate::connections::meta::Meta;
 pub use crate::packets::parser::{
