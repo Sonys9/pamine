@@ -15,16 +15,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use pcore::{decoder::NbtTag, encode};
 use tracing::info;
 
-use crate::packets::{
-    Packet::{self, C2S, S2C},
-    c2s::{
-        self,
-        packets::C2SPacket,
-        play::{ChatCommand, ChatMessage},
-    },
-    frame_packet,
-    s2c::{self, packets::S2CPacket, play::Login},
-};
+use crate::{ids::{self, Item}, packets::{
+    Packet::{self, C2S, S2C}, c2s::{
+        self, packets::C2SPacket, play::{ChatCommand, ChatMessage, SetCreativeModeSlot, UseItemOn},
+    }, frame_packet, s2c::{self, packets::S2CPacket, play::Login},
+}};
 
 /// Decides whether a packet should be rewritten.
 ///
@@ -34,9 +29,22 @@ pub fn on_packet(packet: &Packet<'_>, threshold: Option<i32>) -> Option<Vec<u8>>
         C2S(C2SPacket::Play(c2s::play::Play::ChatMessage(message))) => {
             on_message(message, threshold)
         }
+        C2S(C2SPacket::Play(c2s::play::Play::SetCreativeModeSlot(packet))) => {
+            on_creative_slot(packet);
+            None
+        }
         _ => None,
     }
 }
+
+fn on_creative_slot(packet: &SetCreativeModeSlot) {
+    info!("Packet: {:?}", packet);
+    info!("Item: {:?}", packet.clicked_item);
+    if let Some(item_id) = packet.clicked_item.item_id {
+        info!("Item: {:?}", ids::Item::by_id(item_id.get() as u16));
+    };
+}
+
 /// Rewrites a chat message.
 ///
 /// Each body is wrapped back into the enum and encoded as a whole, so the opcode

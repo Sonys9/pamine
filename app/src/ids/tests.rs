@@ -175,3 +175,60 @@ fn block_registry_matches_blocks_json() {
         assert_eq!(registry.id_of(block.name), Some(block.id));
     }
 }
+
+#[test]
+fn block_try_from() {
+    let stone: &'static Block = 1u16.try_into().expect("id 1 is stone");
+    assert_eq!(stone.name, "stone");
+
+    let grass: &'static Block = "grass_block".try_into().expect("grass_block exists");
+    assert_eq!(grass.id, 8);
+
+    assert_eq!(
+        <&'static Block>::try_from(BLOCK_COUNT as u16),
+        Err(UnknownId(933))
+    );
+    assert_eq!(
+        <&'static Block>::try_from("not_a_block"),
+        Err(UnknownName("not_a_block"))
+    );
+}
+
+#[test]
+fn item_try_from() {
+    let cobble: &'static Item = 22u16.try_into().expect("id 22 is cobblestone");
+    assert_eq!(cobble.name, "cobblestone");
+
+    let diamond: &'static Item = "diamond".try_into().expect("diamond exists");
+    assert_eq!(diamond.id, 722);
+
+    assert_eq!(Item::by_id(1152), None);
+    assert_eq!(Item::by_name("nope"), None);
+    assert_eq!(<&'static Item>::try_from(1152u16), Err(UnknownId(1152)));
+    assert_eq!(<&'static Item>::try_from("nope"), Err(UnknownName("nope")));
+}
+
+#[test]
+fn entity_type_try_from() {
+    let creeper: &'static EntityType = 15u16.try_into().expect("id 15 is creeper");
+    assert_eq!(creeper.name, "creeper");
+
+    let player: &'static EntityType = "player".try_into().expect("player exists");
+    assert_eq!(player.id, 116);
+
+    assert_eq!(EntityType::by_id(118), None);
+    assert_eq!(<&'static EntityType>::try_from(118u16), Err(UnknownId(118)));
+    assert_eq!(
+        <&'static EntityType>::try_from("not_an_entity"),
+        Err(UnknownName("not_an_entity"))
+    );
+}
+
+#[test]
+fn entity_types_match_registry() {
+    let registry = registry("entity_type").expect("entity_type exists");
+    assert_eq!(ENTITY_TYPES.len(), registry.len());
+    for entity in ENTITY_TYPES.iter() {
+        assert_eq!(registry.id_of(entity.name), Some(entity.id));
+    }
+}

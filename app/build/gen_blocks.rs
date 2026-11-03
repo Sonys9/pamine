@@ -444,4 +444,20 @@ impl Block {
         self.max_state_id - self.min_state_id + 1
     }
 }
+
+impl TryFrom<u16> for &'static Block {
+    type Error = UnknownId;
+
+    fn try_from(id: u16) -> Result<Self, Self::Error> {
+        Block::by_id(id).ok_or(UnknownId(id))
+    }
+}
+
+impl<'a> TryFrom<&'a str> for &'static Block {
+    type Error = UnknownName<'a>;
+
+    fn try_from(name: &'a str) -> Result<Self, Self::Error> {
+        Block::by_name(name).ok_or(UnknownName(name))
+    }
+}
 "##;
