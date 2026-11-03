@@ -66,17 +66,23 @@ impl StreamData {
     /// [`BigBuffer::update`] drops the oldest bytes when the buffer would
     /// overflow, so the read cursor has to be shifted by the same amount.
     /// Dropping *unparsed* bytes would silently corrupt the stream, so that is
-    /// treated as a fatal error instead.
-    pub fn update(&mut self, bytes: &[u8]) {
+    /// reported as an error instead.
+    ///
+    /// This returns a `Result` rather than panicking: the caller runs inside a
+    /// spawned task, where a panic aborts the task and leaves the peer's socket
+    /// open. A hostile peer could otherwise kill the task with a single
+    /// oversized write.
+    pub fn update(&mut self, bytes: &[u8]) -> eyre::Result<()> {
         let before = self.buffer.len;
         let start = self.buffer.update(bytes, bytes.len());
         let dropped = before - start;
         if dropped > self.diff {
-            panic!(
+            eyre::bail!(
                 "receive buffer overflow: dropped {} unparsed bytes",
                 dropped - self.diff
             );
         }
         self.diff -= dropped;
+        Ok(())
     }
 }

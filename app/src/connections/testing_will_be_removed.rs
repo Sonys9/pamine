@@ -32,7 +32,7 @@ use crate::{
 /// Decides whether a packet should be rewritten.
 ///
 /// Returns the replacement frames, or `None` to forward the original packet.
-pub fn on_packet(packet: &Packet<'_>, threshold:  &UnsureThreshold) -> Option<Vec<u8>> {
+pub fn on_packet(packet: &Packet<'_>, threshold: &UnsureThreshold) -> Option<Vec<u8>> {
     match packet {
         C2S(C2SPacket::Play(c2s::play::Play::ChatMessage(message))) => {
             on_message(message, threshold)

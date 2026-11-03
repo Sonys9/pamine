@@ -8,7 +8,9 @@
 use pcore::decoder::Decoder;
 
 use crate::packets::{
-    c2s::{self, packets::C2SPacket}, parser::{state::AtomicState, threshold::UnsureThreshold}, s2c::{self, packets::S2CPacket},
+    c2s::{self, packets::C2SPacket},
+    parser::{state::AtomicState, threshold::UnsureThreshold},
+    s2c::{self, packets::S2CPacket},
 };
 
 use super::state::{Packet, Side, State};
@@ -53,7 +55,7 @@ pub(super) fn login<'a>(
                     // A negative threshold disables compression entirely.
                     match value >= 0 {
                         true => threshold.set(value),
-                        false => threshold.reset()
+                        false => threshold.reset(),
                     };
                 }
                 _ => {}

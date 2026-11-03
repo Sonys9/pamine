@@ -38,7 +38,10 @@ use pcore::decoder::Decoder;
 use frame::{Frame, inflate};
 
 use crate::connections::meta::Meta;
-pub use crate::packets::parser::{state::{AtomicState, State}, threshold::UnsureThreshold};
+pub use crate::packets::parser::{
+    state::{AtomicState, State},
+    threshold::UnsureThreshold,
+};
 
 // Parser was holding StreamData, it's a bad way
 pub struct Parser {
@@ -78,7 +81,8 @@ impl Parser {
         // Touch the fields directly rather than through `StreamData::pending`:
         // a method call would borrow the whole struct, and we need `buffer`
         // (shared, for `'a`) and `diff` (mutable) at the same time.
-        let pending: &'a [u8] = &meta.stream_data.buffer.buffer[meta.stream_data.diff..meta.stream_data.buffer.len];
+        let pending: &'a [u8] =
+            &meta.stream_data.buffer.buffer[meta.stream_data.diff..meta.stream_data.buffer.len];
 
         let Some(frame) = Frame::split(pending, threshold)? else {
             return Ok(None);
@@ -107,9 +111,7 @@ impl Parser {
 
         let packet = match self.state.get() {
             State::Handshake => dispatch::handshake(&self.state, opcode, decoder, side)?,
-            State::Login => {
-                dispatch::login(&self.state, opcode, decoder, side, &self.threshold)?
-            }
+            State::Login => dispatch::login(&self.state, opcode, decoder, side, &self.threshold)?,
             State::Status => dispatch::status(opcode, decoder, side)?,
             State::Play => dispatch::play(opcode, decoder, side)?,
         };

@@ -9,7 +9,7 @@ impl Meta {
     pub fn new() -> Self {
         Self {
             stream_data: StreamData::default(),
-            decompress_buffer: Vec::new() 
+            decompress_buffer: Vec::new(),
         }
     }
 }

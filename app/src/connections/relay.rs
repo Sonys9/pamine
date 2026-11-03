@@ -48,7 +48,7 @@ pub async fn connection_side(
             );
         };
 
-        meta.stream_data.update(&buffer[..len]);
+        meta.stream_data.update(&buffer[..len])?;
         // One read can carry several packets, so drain the buffer completely.
         //
         // A parse error is fatal: the stream is desynchronised and there is no

@@ -12,10 +12,10 @@
 //! opens the upstream socket and then races the two relay directions, so the
 //! first one to finish (or fail) tears down the whole connection.
 
+pub mod meta;
 mod relay;
 mod socket;
 mod testing_will_be_removed;
-pub mod meta;
 
 use std::{net::SocketAddr, sync::Arc};
 
