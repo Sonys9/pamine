@@ -109,11 +109,30 @@ impl Parser {
         // `pending` still holds a shared borrow of `stream.buffer`.
         meta.stream_data.diff += consumed;
 
-        let packet = match self.state.get() {
-            State::Handshake => dispatch::handshake(&self.state, opcode, decoder, side)?,
-            State::Login => dispatch::login(&self.state, opcode, decoder, side, &self.threshold)?,
-            State::Status => dispatch::status(opcode, decoder, side)?,
-            State::Play => dispatch::play(opcode, decoder, side)?,
+        let state = self.state.get();
+        let packet = match state {
+            State::Handshake => dispatch::handshake(&self.state, opcode, decoder, side),
+            State::Login => dispatch::login(&self.state, opcode, decoder, side, &self.threshold),
+            State::Status => dispatch::status(opcode, decoder, side),
+            State::Play => dispatch::play(opcode, decoder, side),
+        };
+
+        // TEMPORARY DIAGNOSTIC: names the exact packet body that fails to
+        // decode. Logged only on failure, so it costs nothing in the hot path
+        // and does not flood the log during normal play. Remove once the
+        // mis-modelled packet is found.
+        let packet = match packet {
+            Ok(packet) => packet,
+            Err(e) => {
+                tracing::error!(
+                    side = ?side,
+                    state = ?state,
+                    opcode = format_args!("0x{opcode:02X}"),
+                    body_len = body.len(),
+                    "failed to decode packet body: {e}"
+                );
+                return Err(e);
+            }
         };
         Ok(Some(packet))
     }
