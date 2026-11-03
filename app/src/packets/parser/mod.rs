@@ -118,9 +118,9 @@ impl Parser {
         };
 
         // TEMPORARY DIAGNOSTIC: names the exact packet body that fails to
-        // decode. Logged only on failure, so it costs nothing in the hot path
-        // and does not flood the log during normal play. Remove once the
-        // mis-modelled packet is found.
+        // decode and dumps it to disk so the real wire layout can be compared
+        // against the model. Logged only on failure, so it costs nothing in the
+        // hot path. Remove once the mis-modelled packet is found.
         let packet = match packet {
             Ok(packet) => packet,
             Err(e) => {
@@ -131,6 +131,12 @@ impl Parser {
                     body_len = body.len(),
                     "failed to decode packet body: {e}"
                 );
+                let path = format!("/tmp/nfqueue-failed-0x{opcode:02X}.bin");
+                if let Err(write_err) = std::fs::write(&path, body) {
+                    tracing::error!("failed to dump the body to {path}: {write_err}");
+                } else {
+                    tracing::error!("dumped the failing body to {path}");
+                }
                 return Err(e);
             }
         };
