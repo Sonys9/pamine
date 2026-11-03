@@ -334,6 +334,11 @@ impl Encode for CommandParser<'_> {
 
 /// Reads the properties of the parser with the given id.
 ///
+/// The ids are the `minecraft:command_argument_type` registry, which is dense
+/// `0..=47` in 1.19.2. Getting one wrong desynchronises the whole packet: the
+/// cursor lands mid-field and the next node is read from garbage, which shows
+/// up as `Invalid UTF-8` far away from the actual mistake.
+///
 /// An unknown id is an error: the wiki is explicit that the rest of the packet
 /// cannot be unpacked once an unknown parser is met.
 fn parser_properties<'a>(
@@ -409,17 +414,134 @@ fn parser_properties<'a>(
         6 => CommandParser::Entity {
             flags: decoder.u8()?,
         },
-        31 => CommandParser::ScoreHolder {
+        // `minecraft:score_holder` — 0x01 allows multiple.
+        29 => CommandParser::ScoreHolder {
             flags: decoder.u8()?,
         },
-        43 => CommandParser::Time {
+        // `minecraft:time` — minimum duration in ticks.
+        42 => CommandParser::Time {
             min: decoder.i32()?,
         },
-        44..=48 => CommandParser::Resource {
+        // `minecraft:resource_or_tag` and `minecraft:resource` both carry the
+        // registry identifier they suggest from.
+        43..=44 => CommandParser::Resource {
             registry: decoder.string()?,
         },
-        // Every other 1.19.2 parser (7-30, 32-42, 49-56) has no properties.
-        7..=56 => CommandParser::None,
+        // Every other 1.19.2 parser (7-28, 30-41, 45-47) has no properties.
+        7..=47 => CommandParser::None,
         other => return Err(Error::UnknownOpcode(other)),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The ids are the `minecraft:command_argument_type` registry. A wrong id
+    /// here does not fail locally: it shifts the cursor and the *next* node is
+    /// read from garbage, which surfaces as `Invalid UTF-8` somewhere else in
+    /// the packet. So the ids are pinned explicitly.
+    #[test]
+    fn parser_ids_match_the_1_19_2_registry() {
+        // (id, name, bytes of properties on the wire)
+        let cases: &[(i32, &str, &[u8])] = &[
+            (0, "brigadier:bool", &[]),
+            (1, "brigadier:float", &[0x00]),
+            (2, "brigadier:double", &[0x00]),
+            (3, "brigadier:integer", &[0x00]),
+            (4, "brigadier:long", &[0x00]),
+            (5, "brigadier:string", &[0x00]),
+            (6, "minecraft:entity", &[0x00]),
+            (7, "minecraft:game_profile", &[]),
+            (8, "minecraft:block_pos", &[]),
+            (9, "minecraft:column_pos", &[]),
+            (10, "minecraft:vec3", &[]),
+            (11, "minecraft:vec2", &[]),
+            (12, "minecraft:block_state", &[]),
+            (13, "minecraft:block_predicate", &[]),
+            (14, "minecraft:item_stack", &[]),
+            (15, "minecraft:item_predicate", &[]),
+            (16, "minecraft:color", &[]),
+            (17, "minecraft:component", &[]),
+            (18, "minecraft:message", &[]),
+            (19, "minecraft:nbt_compound_tag", &[]),
+            (20, "minecraft:nbt_tag", &[]),
+            (21, "minecraft:nbt_path", &[]),
+            (22, "minecraft:objective", &[]),
+            (23, "minecraft:objective_criteria", &[]),
+            (24, "minecraft:operation", &[]),
+            (25, "minecraft:particle", &[]),
+            (26, "minecraft:angle", &[]),
+            (27, "minecraft:rotation", &[]),
+            (28, "minecraft:scoreboard_slot", &[]),
+            (29, "minecraft:score_holder", &[0x00]),
+            (30, "minecraft:swizzle", &[]),
+            (31, "minecraft:team", &[]),
+            (32, "minecraft:item_slot", &[]),
+            (33, "minecraft:resource_location", &[]),
+            (34, "minecraft:mob_effect", &[]),
+            (35, "minecraft:function", &[]),
+            (36, "minecraft:entity_anchor", &[]),
+            (37, "minecraft:int_range", &[]),
+            (38, "minecraft:float_range", &[]),
+            (39, "minecraft:item_enchantment", &[]),
+            (40, "minecraft:entity_summon", &[]),
+            (41, "minecraft:dimension", &[]),
+            (42, "minecraft:time", &[0x00, 0x00, 0x00, 0x00]),
+            (43, "minecraft:resource_or_tag", &[0x00]),
+            (44, "minecraft:resource", &[0x00]),
+            (45, "minecraft:template_mirror", &[]),
+            (46, "minecraft:template_rotation", &[]),
+            (47, "minecraft:uuid", &[]),
+        ];
+
+        for (id, name, properties) in cases {
+            let mut decoder = Decoder::new(properties);
+            let parsed = parser_properties(&mut decoder, *id)
+                .unwrap_or_else(|e| panic!("{name} (id {id}) failed to parse: {e}"));
+            assert_eq!(
+                decoder.remaining(),
+                0,
+                "{name} (id {id}) left {} bytes unread, parsed as {parsed:?}",
+                decoder.remaining()
+            );
+        }
+    }
+
+    /// The two ids that were wrong before: `score_holder` and `time` were
+    /// treated as property-less, and `resource_or_tag` was read as an `i32`.
+    #[test]
+    fn score_holder_and_time_read_their_properties() {
+        let mut decoder = Decoder::new(&[0x01]);
+        let parsed = parser_properties(&mut decoder, 29).unwrap();
+        assert!(matches!(parsed, CommandParser::ScoreHolder { flags: 1 }));
+        assert_eq!(decoder.remaining(), 0);
+
+        let mut decoder = Decoder::new(&[0x00, 0x00, 0x00, 0x05]);
+        let parsed = parser_properties(&mut decoder, 42).unwrap();
+        assert!(matches!(parsed, CommandParser::Time { min: 5 }));
+        assert_eq!(decoder.remaining(), 0);
+    }
+
+    /// `resource_or_tag` (43) carries a registry string, not an `i32`.
+    #[test]
+    fn resource_or_tag_reads_a_registry_string() {
+        // VarInt length 4 followed by "item".
+        let mut decoder = Decoder::new(&[0x04, b'i', b't', b'e', b'm']);
+        let parsed = parser_properties(&mut decoder, 43).unwrap();
+        match parsed {
+            CommandParser::Resource { registry } => assert_eq!(registry, "item"),
+            other => panic!("expected Resource, got {other:?}"),
+        }
+        assert_eq!(decoder.remaining(), 0);
+    }
+
+    /// `template_mirror` (45) has no properties, so nothing may be consumed.
+    #[test]
+    fn template_mirror_has_no_properties() {
+        let mut decoder = Decoder::new(&[]);
+        let parsed = parser_properties(&mut decoder, 45).unwrap();
+        assert!(matches!(parsed, CommandParser::None));
+        assert_eq!(decoder.remaining(), 0);
+    }
 }
