@@ -16,6 +16,8 @@ use pcore::{
     encoder::{packet_frame, write_varint},
 };
 
+use crate::packets::parser::threshold::UnsureThreshold;
+
 /// Largest packet body the protocol allows, compressed or not.
 ///
 /// Vanilla 1.19.2 never sends a body above 2 MiB, and the receive buffer is
@@ -46,7 +48,7 @@ impl<'a> Frame<'a> {
     /// Splits the first frame off `pending`.
     ///
     /// Returns `Ok(None)` when `pending` does not yet contain a whole frame.
-    pub fn split(pending: &'a [u8], threshold: Option<i32>) -> eyre::Result<Option<Self>> {
+    pub fn split(pending: &'a [u8], threshold: &UnsureThreshold) -> eyre::Result<Option<Self>> {
         let mut head = Decoder::new(pending);
         let Ok(len) = head.varint().map(|v| v.get()) else {
             // Not even the length prefix is complete yet.
@@ -72,7 +74,7 @@ impl<'a> Frame<'a> {
 
         let body = &pending[prefix_len..total];
 
-        let Some(_threshold) = threshold else {
+        let Some(_threshold) = threshold.get() else {
             return Ok(Some(Self {
                 body,
                 compressed: false,
@@ -145,8 +147,8 @@ pub fn deflate(payload: &[u8]) -> eyre::Result<Vec<u8>> {
 ///
 /// A packet written without this header on a compressed connection is read by
 /// the peer as a bogus `data_len` and the connection is dropped.
-pub fn frame_packet(body: &[u8], threshold: Option<i32>) -> eyre::Result<Vec<u8>> {
-    let Some(threshold) = threshold else {
+pub fn frame_packet(body: &[u8], threshold: &UnsureThreshold) -> eyre::Result<Vec<u8>> {
+    let Some(threshold) = threshold.get() else {
         return Ok(packet_frame(body));
     };
 

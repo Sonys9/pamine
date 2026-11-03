@@ -15,13 +15,14 @@
 mod relay;
 mod socket;
 mod testing_will_be_removed;
+pub mod meta;
 
 use std::{net::SocketAddr, sync::Arc};
 
 use tokio::{net::TcpStream, sync::Mutex};
 use tracing::info;
 
-use crate::packets::Parser;
+use crate::{connections::meta::Meta, packets::{Parser, StreamData}};
 
 use socket::{get_stream, stream_to_target_addr};
 
@@ -49,10 +50,11 @@ impl Connector {
 
         // One parser is shared by both directions: the state machine and the
         // compression threshold are per-connection, not per-direction.
-        let parser = Arc::new(Mutex::new(Parser::new()));
+        let parser = Arc::new(Parser::new());
         tokio::select! {
-            res = relay::connection_side(stream_reader, target_stream_writer, self.local_addr, parser.clone()) => res,
-            res = relay::connection_side(target_stream_reader, stream_writer, self.local_addr, parser) => res,
+            // Clone doesn't cost anything atp because it's an Arc
+            res = relay::connection_side(stream_reader, target_stream_writer, self.local_addr, parser.clone(), Meta::new()) => res,
+            res = relay::connection_side(target_stream_reader, stream_writer, self.local_addr, parser, Meta::new()) => res,
         }
     }
 }

@@ -9,7 +9,7 @@ use tokio::{
 };
 use tracing::error;
 
-use crate::packets::{Parser, Side};
+use crate::{connections::meta::Meta, packets::{Parser, Side, StreamData}};
 
 use super::testing_will_be_removed::on_packet;
 
@@ -23,7 +23,8 @@ pub async fn connection_side(
     mut stream: OwnedReadHalf,
     mut target_stream: OwnedWriteHalf,
     local_addr: SocketAddr,
-    parser: Arc<Mutex<Parser>>,
+    parser: Arc<Parser>,
+    mut meta: Meta,
 ) -> eyre::Result<()> {
     let target_addr = target_stream.local_addr()?;
     let client_addr = stream.local_addr()?;
@@ -45,14 +46,12 @@ pub async fn connection_side(
             );
         };
 
-        let mut parser = parser.lock().await;
-        parser.update(side, &buffer[..len]);
+        meta.stream_data.update(&buffer[..len]);
         // One read can carry several packets, so drain the buffer completely.
-        while let Some(packet) = parse_packet(&mut parser, side, &buffer[..len]) {
+        while let Some(packet) = parse_packet(&parser, side, &buffer[..len], &mut meta) {
             target_stream.write_all(&packet).await?;
-            parser.clear(side);
+            meta.stream_data.clear();
         }
-        drop(parser);
     }
 }
 
@@ -67,14 +66,15 @@ pub async fn connection_side(
 /// several frames back to back — TCP is a byte stream, so the peer reads them
 /// one at a time, and one `write_all` is cheaper than one syscall per packet.
 fn parse_packet<'a>(
-    parser: &'a mut MutexGuard<'_, Parser>,
+    parser: &'a Arc<Parser>,
     side: Side,
     buffer: &[u8],
+    meta: &'a mut Meta,
 ) -> Option<Cow<'a, [u8]>> {
     // Read the threshold before `try_parse` borrows the parser: a hand-built
     // frame has to carry the same `data_len` header the peer expects.
     let threshold = parser.threshold();
-    match parser.try_parse(side) {
+    match parser.try_parse(side, meta) {
         // `None` means the buffer holds only a partial packet;
         // wait for the next read instead of logging an error.
         Ok(None) => return None,
@@ -93,5 +93,5 @@ fn parse_packet<'a>(
         }
     };
     // Nothing was rewritten: forward the original bytes untouched.
-    Some(Cow::Borrowed(parser.packet_bytes(side)))
+    Some(Cow::Borrowed(meta.stream_data.packet_bytes()))
 }

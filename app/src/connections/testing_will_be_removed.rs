@@ -15,16 +15,20 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use pcore::{decoder::NbtTag, encode};
 use tracing::info;
 
-use crate::{ids::{self, Item}, packets::{
-    Packet::{self, C2S, S2C}, c2s::{
-        self, packets::C2SPacket, play::{ChatCommand, ChatMessage, SetCreativeModeSlot, UseItemOn},
-    }, frame_packet, s2c::{self, packets::S2CPacket, play::Login},
-}};
+use crate::{
+    ids::{self, Item}, packets::{
+        Packet::{self, C2S, S2C}, UnsureThreshold, c2s::{
+            self,
+            packets::C2SPacket,
+            play::{ChatCommand, ChatMessage, SetCreativeModeSlot, UseItemOn},
+        }, frame_packet, s2c::{self, packets::S2CPacket, play::Login},
+    },
+};
 
 /// Decides whether a packet should be rewritten.
 ///
 /// Returns the replacement frames, or `None` to forward the original packet.
-pub fn on_packet(packet: &Packet<'_>, threshold: Option<i32>) -> Option<Vec<u8>> {
+pub fn on_packet(packet: &Packet<'_>, threshold:  &UnsureThreshold) -> Option<Vec<u8>> {
     match packet {
         C2S(C2SPacket::Play(c2s::play::Play::ChatMessage(message))) => {
             on_message(message, threshold)
@@ -50,7 +54,7 @@ fn on_creative_slot(packet: &SetCreativeModeSlot) {
 /// Each body is wrapped back into the enum and encoded as a whole, so the opcode
 /// comes from `#[id(0x05)]` on `Play::ChatMessage` and is never spelled out by
 /// hand.
-fn on_message(packet: &ChatMessage<'_>, threshold: Option<i32>) -> Option<Vec<u8>> {
+fn on_message(packet: &ChatMessage<'_>, threshold: &UnsureThreshold) -> Option<Vec<u8>> {
     info!("The local player just typed '{}'", packet.message);
     if packet.message != "Info" {
         return None;

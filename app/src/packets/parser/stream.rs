@@ -39,4 +39,27 @@ impl StreamData {
         self.buffer.move_buffer(self.diff, 0);
         self.diff = 0;
     }
+
+    /// Drops already-parsed bytes and rewinds the read cursor.
+    pub fn clear(&mut self) {
+        self.compact();
+    }
+
+    /// True when no unparsed bytes remain for this direction.
+    ///
+    /// Note this is not the same as "the buffer is empty": parsed bytes stay in
+    /// the buffer until [`clear`](Self::clear) compacts it.
+    pub fn is_empty(&self) -> bool {
+        self.is_drained()
+    }
+
+    /// Returns parsed packet's bytes
+    pub fn packet_bytes(&mut self) -> &[u8] {
+        &self.buffer.buffer[..self.diff]
+    }
+
+    /// Appends freshly received bytes for one direction.
+    pub fn update(&mut self, bytes: &[u8]) {
+        self.buffer.update(bytes, bytes.len());
+    }
 }

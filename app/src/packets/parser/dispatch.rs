@@ -8,14 +8,13 @@
 use pcore::decoder::Decoder;
 
 use crate::packets::{
-    c2s::{self, packets::C2SPacket},
-    s2c::{self, packets::S2CPacket},
+    c2s::{self, packets::C2SPacket}, parser::{state::AtomicState, threshold::UnsureThreshold}, s2c::{self, packets::S2CPacket},
 };
 
 use super::state::{Packet, Side, State};
 
 pub(super) fn handshake<'a>(
-    state: &mut State,
+    state: &AtomicState,
     opcode: i32,
     mut decoder: Decoder<'a>,
     side: Side,
@@ -26,19 +25,19 @@ pub(super) fn handshake<'a>(
 
     let parsed = c2s::handshake::Handshake::decode_by_opcode(opcode, &mut decoder)?;
     let c2s::handshake::Handshake::Handshaking(ref packet) = parsed;
-    *state = match packet.next_state.get() {
+    state.set(match packet.next_state.get() {
         1 => State::Status,
         _ => State::Login,
-    };
+    });
     Ok(Packet::C2S(C2SPacket::Handshake(parsed)))
 }
 
 pub(super) fn login<'a>(
-    state: &mut State,
+    state: &AtomicState,
     opcode: i32,
     mut decoder: Decoder<'a>,
     side: Side,
-    threshold: &mut Option<i32>,
+    threshold: &UnsureThreshold,
 ) -> eyre::Result<Packet<'a>> {
     match side {
         Side::C2S => {
@@ -48,11 +47,14 @@ pub(super) fn login<'a>(
         Side::S2C => {
             let parsed = s2c::login::Login::decode_by_opcode(opcode, &mut decoder)?;
             match &parsed {
-                s2c::login::Login::LoginSuccess(_) => *state = State::Play,
+                s2c::login::Login::LoginSuccess(_) => state.set(State::Play),
                 s2c::login::Login::SetCompression(set) => {
                     let value = set.threshold.get();
                     // A negative threshold disables compression entirely.
-                    *threshold = (value >= 0).then_some(value);
+                    match value >= 0 {
+                        true => threshold.set(value),
+                        false => threshold.reset()
+                    };
                 }
                 _ => {}
             }
