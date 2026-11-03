@@ -117,10 +117,9 @@ impl Parser {
             State::Play => dispatch::play(opcode, decoder, side),
         };
 
-        // TEMPORARY DIAGNOSTIC: names the exact packet body that fails to
-        // decode and dumps it to disk so the real wire layout can be compared
-        // against the model. Logged only on failure, so it costs nothing in the
-        // hot path. Remove once the mis-modelled packet is found.
+        // A body that fails to decode is not fatal: the frame boundary is
+        // already known, so the relay forwards the packet untouched. Log the
+        // opcode so a mis-modelled packet can be identified from the log alone.
         let packet = match packet {
             Ok(packet) => packet,
             Err(e) => {
@@ -131,12 +130,6 @@ impl Parser {
                     body_len = body.len(),
                     "failed to decode packet body: {e}"
                 );
-                let path = format!("/tmp/nfqueue-failed-0x{opcode:02X}.bin");
-                if let Err(write_err) = std::fs::write(&path, body) {
-                    tracing::error!("failed to dump the body to {path}: {write_err}");
-                } else {
-                    tracing::error!("dumped the failing body to {path}");
-                }
                 return Err(e);
             }
         };

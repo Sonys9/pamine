@@ -109,8 +109,6 @@ pub enum CommandParser<'a> {
     Entity { flags: u8 },
     /// `minecraft:score_holder` — 0x01 allows multiple.
     ScoreHolder { flags: u8 },
-    /// `minecraft:time` — minimum duration in ticks.
-    Time { min: i32 },
     /// `minecraft:resource*` — the registry suggestions come from.
     Resource { registry: &'a str },
 }
@@ -160,25 +158,8 @@ impl<'a> Decode<'a> for Commands<'a> {
             return Err(Error::Nbt("negative command node count"));
         }
         let mut nodes = Vec::with_capacity(count as usize);
-        for index in 0..count {
-            let start = decoder.len();
-            match CommandNode::decode(decoder) {
-                Ok(node) => nodes.push(node),
-                Err(e) => {
-                    // TEMPORARY DIAGNOSTIC: names the exact node and offset
-                    // that failed, so the mis-modelled field can be found
-                    // without guessing. Remove once fixed.
-                    tracing::error!(
-                        node_index = index,
-                        node_count = count,
-                        offset = start,
-                        consumed = decoder.len() - start,
-                        remaining = decoder.remaining(),
-                        "command node failed to decode: {e}"
-                    );
-                    return Err(e);
-                }
-            }
+        for _ in 0..count {
+            nodes.push(CommandNode::decode(decoder)?);
         }
         let root_index = decoder.varint()?;
         Ok(Self { nodes, root_index })
@@ -346,7 +327,6 @@ impl Encode for CommandParser<'_> {
             Self::String { behavior } => encoder.varint(behavior.get()),
             Self::Entity { flags } => encoder.u8(*flags),
             Self::ScoreHolder { flags } => encoder.u8(*flags),
-            Self::Time { min } => encoder.i32(*min),
             Self::Resource { registry } => encoder.string(registry),
         }
     }
@@ -441,10 +421,12 @@ fn parser_properties<'a>(
         parser::SCORE_HOLDER => CommandParser::ScoreHolder {
             flags: decoder.u8()?,
         },
-        // Minimum duration in ticks.
-        parser::TIME => CommandParser::Time {
-            min: decoder.i32()?,
-        },
+        // `minecraft:time` has no properties in 1.19.2. Reading an `i32` here
+        // consumed the first four bytes of the *next* node, which desynchronised
+        // the rest of the graph and surfaced as `Invalid UTF-8` on a 22 KB
+        // `Commands` packet. Verified against a captured body: with no read
+        // here the packet parses to exactly zero remaining bytes.
+        parser::TIME => CommandParser::None,
         // Both carry the registry identifier they suggest from.
         parser::RESOURCE_OR_TAG | parser::RESOURCE => CommandParser::Resource {
             registry: decoder.string()?,
@@ -513,18 +495,25 @@ mod tests {
         );
     }
 
-    /// `score_holder` and `time` carry properties; treating them as
-    /// property-less shifted the cursor and corrupted the rest of the packet.
+    /// `score_holder` carries a flags byte.
     #[test]
-    fn score_holder_and_time_read_their_properties() {
+    fn score_holder_reads_its_flags() {
         let mut decoder = Decoder::new(&[0x01]);
         let parsed = parser_properties(&mut decoder, command_argument_type::SCORE_HOLDER).unwrap();
         assert!(matches!(parsed, CommandParser::ScoreHolder { flags: 1 }));
         assert_eq!(decoder.remaining(), 0);
+    }
 
-        let mut decoder = Decoder::new(&[0x00, 0x00, 0x00, 0x05]);
+    /// `minecraft:time` has **no** properties in 1.19.2.
+    ///
+    /// Reading an `i32` here was the actual cause of the `Invalid UTF-8` on a
+    /// 22 KB `Commands` packet: it ate the first four bytes of the next node,
+    /// and every node after that was decoded from the wrong offset.
+    #[test]
+    fn time_has_no_properties() {
+        let mut decoder = Decoder::new(&[]);
         let parsed = parser_properties(&mut decoder, command_argument_type::TIME).unwrap();
-        assert!(matches!(parsed, CommandParser::Time { min: 5 }));
+        assert!(matches!(parsed, CommandParser::None));
         assert_eq!(decoder.remaining(), 0);
     }
 
@@ -560,6 +549,42 @@ mod tests {
         assert!(parser_properties(&mut decoder, id).is_err());
     }
 
+    /// A real `Commands` body captured from a 1.19.2 server, 22 223 bytes.
+    ///
+    /// This is the packet that used to fail with `Invalid UTF-8`: the decoder
+    /// read an `i32` for `minecraft:time`, which has no properties, and every
+    /// node after it was decoded from the wrong offset. The body must now parse
+    /// to exactly zero remaining bytes.
+    #[test]
+    fn captured_commands_packet_parses_completely() {
+        let body = include_bytes!("../../../../tests/data/commands-1.19.2.bin");
+        let mut decoder = Decoder::new(body);
+
+        // The body starts with the opcode, then the node count.
+        let opcode = decoder.varint().unwrap().get();
+        assert_eq!(opcode, 0x0F, "expected the Commands opcode");
+
+        let commands = Commands::decode(&mut decoder).expect("the captured body must decode");
+        assert_eq!(commands.nodes.len(), 1271);
+        assert_eq!(decoder.remaining(), 0, "the body was not fully consumed");
+
+        // The three `minecraft:time` nodes are the ones that used to break.
+        let time_nodes: Vec<&CommandNode<'_>> = commands
+            .nodes
+            .iter()
+            .filter(|node| node.parser_id.map(|id| id.get()) == Some(command_argument_type::TIME))
+            .collect();
+        assert_eq!(time_nodes.len(), 3, "expected three `time` nodes");
+        for node in time_nodes {
+            assert_eq!(node.name, Some("time"));
+            assert!(
+                matches!(node.parser, Some(CommandParser::None)),
+                "`time` must have no properties, got {:?}",
+                node.parser
+            );
+        }
+    }
+
     /// The bytes each parser carries on the wire, keyed by registry name.
     ///
     /// Only the parsers with properties need real bytes; the rest must consume
@@ -574,8 +599,6 @@ mod tests {
             "brigadier:string" => &[0x00],
             // A flags byte.
             "entity" | "score_holder" => &[0x00],
-            // An i32 minimum.
-            "time" => &[0x00, 0x00, 0x00, 0x00],
             // A VarInt-prefixed registry identifier.
             "resource_or_tag" | "resource" => &[0x00],
             // Everything else has no properties on the wire.
