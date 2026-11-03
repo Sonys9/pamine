@@ -14,3 +14,7 @@ pcore-gen = { path = "../pcore-gen" }
 # `all` is needed for `original_dst_v4` / `original_dst_v6`.
 socket2 = { version = "0.6.5", features = ["all"] }
 flate2 = "1.1.10"
+
+[build-dependencies]
+# Used by build.rs to turn data/blocks.json into static tables.
+serde_json = "1"

@@ -12,13 +12,18 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use pcore::encode;
+use pcore::{decoder::NbtTag, encode};
 use tracing::info;
 
 use crate::packets::{
-    Packet::{self, C2S}, c2s::{
-        self, packets::C2SPacket, play::{ChatCommand, ChatMessage},
-    }, frame_packet,
+    Packet::{self, C2S, S2C},
+    c2s::{
+        self,
+        packets::C2SPacket,
+        play::{ChatCommand, ChatMessage},
+    },
+    frame_packet,
+    s2c::{self, packets::S2CPacket, play::Login},
 };
 
 /// Decides whether a packet should be rewritten.
@@ -32,7 +37,6 @@ pub fn on_packet(packet: &Packet<'_>, threshold: Option<i32>) -> Option<Vec<u8>>
         _ => None,
     }
 }
-
 /// Rewrites a chat message.
 ///
 /// Each body is wrapped back into the enum and encoded as a whole, so the opcode
@@ -51,7 +55,7 @@ fn on_message(packet: &ChatMessage<'_>, threshold: Option<i32>) -> Option<Vec<u8
         packet.message = message;
         let message_packet = encode(&c2s::play::Play::ChatMessage(packet));
         result.extend_from_slice(&frame_packet(&message_packet, threshold).ok()?);
-    };
+    }
 
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)

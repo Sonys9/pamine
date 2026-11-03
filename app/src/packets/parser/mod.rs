@@ -124,7 +124,6 @@ impl Parser {
         Ok(Some(packet))
     }
 
-    
     /// Returns parsed packet's bytes
     pub fn packet_bytes(&mut self, side: Side) -> &[u8] {
         let stream_data = self.stream_mut(side);
@@ -139,7 +138,7 @@ impl Parser {
     pub fn threshold(&self) -> Option<i32> {
         self.threshold
     }
-    
+
     /// Drops already-parsed bytes and rewinds the read cursor.
     pub fn clear(&mut self, side: Side) {
         self.stream_mut(side).compact();
