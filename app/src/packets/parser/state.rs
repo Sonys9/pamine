@@ -72,7 +72,6 @@ impl TryFrom<State> for u8 {
             State::Login => 1,
             State::Play => 2,
             State::Status => 3,
-            _ => eyre::bail!("Bad state id"),
         })
     }
 }

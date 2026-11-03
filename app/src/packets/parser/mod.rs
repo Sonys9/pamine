@@ -123,7 +123,7 @@ impl Parser {
         let packet = match packet {
             Ok(packet) => packet,
             Err(e) => {
-                tracing::error!(
+                error!(
                     side = ?side,
                     state = ?state,
                     opcode = format_args!("0x{opcode:02X}"),
