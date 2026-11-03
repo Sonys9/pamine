@@ -160,8 +160,25 @@ impl<'a> Decode<'a> for Commands<'a> {
             return Err(Error::Nbt("negative command node count"));
         }
         let mut nodes = Vec::with_capacity(count as usize);
-        for _ in 0..count {
-            nodes.push(CommandNode::decode(decoder)?);
+        for index in 0..count {
+            let start = decoder.len();
+            match CommandNode::decode(decoder) {
+                Ok(node) => nodes.push(node),
+                Err(e) => {
+                    // TEMPORARY DIAGNOSTIC: names the exact node and offset
+                    // that failed, so the mis-modelled field can be found
+                    // without guessing. Remove once fixed.
+                    tracing::error!(
+                        node_index = index,
+                        node_count = count,
+                        offset = start,
+                        consumed = decoder.len() - start,
+                        remaining = decoder.remaining(),
+                        "command node failed to decode: {e}"
+                    );
+                    return Err(e);
+                }
+            }
         }
         let root_index = decoder.varint()?;
         Ok(Self { nodes, root_index })
