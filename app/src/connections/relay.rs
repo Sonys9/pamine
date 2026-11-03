@@ -5,11 +5,13 @@ use std::{borrow::Cow, net::SocketAddr, sync::Arc};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::tcp::{OwnedReadHalf, OwnedWriteHalf},
-    sync::{Mutex, MutexGuard},
 };
 use tracing::error;
 
-use crate::{connections::meta::Meta, packets::{Parser, Side, StreamData}};
+use crate::{
+    connections::meta::Meta,
+    packets::{Parser, Side},
+};
 
 use super::testing_will_be_removed::on_packet;
 
@@ -48,7 +50,11 @@ pub async fn connection_side(
 
         meta.stream_data.update(&buffer[..len]);
         // One read can carry several packets, so drain the buffer completely.
-        while let Some(packet) = parse_packet(&parser, side, &buffer[..len], &mut meta) {
+        //
+        // A parse error is fatal: the stream is desynchronised and there is no
+        // way to find the next packet boundary, so the connection is torn down
+        // instead of spinning on the same bytes forever.
+        while let Some(packet) = parse_packet(&parser, side, &buffer[..len], &mut meta)? {
             target_stream.write_all(&packet).await?;
             meta.stream_data.clear();
         }
@@ -70,17 +76,17 @@ fn parse_packet<'a>(
     side: Side,
     buffer: &[u8],
     meta: &'a mut Meta,
-) -> Option<Cow<'a, [u8]>> {
+) -> eyre::Result<Option<Cow<'a, [u8]>>> {
     // Read the threshold before `try_parse` borrows the parser: a hand-built
     // frame has to carry the same `data_len` header the peer expects.
     let threshold = parser.threshold();
     match parser.try_parse(side, meta) {
         // `None` means the buffer holds only a partial packet;
         // wait for the next read instead of logging an error.
-        Ok(None) => return None,
+        Ok(None) => return Ok(None),
         Ok(Some(packet)) => {
             if let Some(framed) = on_packet(&packet, threshold) {
-                return Some(Cow::Owned(framed));
+                return Ok(Some(Cow::Owned(framed)));
             };
         }
         Err(e) => {
@@ -90,8 +96,9 @@ fn parse_packet<'a>(
                 e,
                 &buffer[..buffer.len().min(50)]
             );
+            return Err(e);
         }
     };
     // Nothing was rewritten: forward the original bytes untouched.
-    Some(Cow::Borrowed(meta.stream_data.packet_bytes()))
+    Ok(Some(Cow::Borrowed(meta.stream_data.packet_bytes())))
 }

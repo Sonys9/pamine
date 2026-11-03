@@ -53,13 +53,30 @@ impl StreamData {
         self.is_drained()
     }
 
-    /// Returns parsed packet's bytes
-    pub fn packet_bytes(&mut self) -> &[u8] {
+    /// Returns the bytes of the packet that was just parsed.
+    ///
+    /// The caller clears the buffer after forwarding a packet, so `diff` is the
+    /// size of exactly one packet here.
+    pub fn packet_bytes(&self) -> &[u8] {
         &self.buffer.buffer[..self.diff]
     }
 
     /// Appends freshly received bytes for one direction.
+    ///
+    /// [`BigBuffer::update`] drops the oldest bytes when the buffer would
+    /// overflow, so the read cursor has to be shifted by the same amount.
+    /// Dropping *unparsed* bytes would silently corrupt the stream, so that is
+    /// treated as a fatal error instead.
     pub fn update(&mut self, bytes: &[u8]) {
-        self.buffer.update(bytes, bytes.len());
+        let before = self.buffer.len;
+        let start = self.buffer.update(bytes, bytes.len());
+        let dropped = before - start;
+        if dropped > self.diff {
+            panic!(
+                "receive buffer overflow: dropped {} unparsed bytes",
+                dropped - self.diff
+            );
+        }
+        self.diff -= dropped;
     }
 }

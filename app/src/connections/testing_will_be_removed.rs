@@ -12,16 +12,20 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use pcore::{decoder::NbtTag, encode};
+use pcore::encode;
 use tracing::info;
 
 use crate::{
-    ids::{self, Item}, packets::{
-        Packet::{self, C2S, S2C}, UnsureThreshold, c2s::{
+    ids,
+    packets::{
+        Packet::{self, C2S},
+        UnsureThreshold,
+        c2s::{
             self,
             packets::C2SPacket,
-            play::{ChatCommand, ChatMessage, SetCreativeModeSlot, UseItemOn},
-        }, frame_packet, s2c::{self, packets::S2CPacket, play::Login},
+            play::{ChatCommand, ChatMessage, SetCreativeModeSlot},
+        },
+        frame_packet,
     },
 };
 

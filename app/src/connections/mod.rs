@@ -19,10 +19,10 @@ pub mod meta;
 
 use std::{net::SocketAddr, sync::Arc};
 
-use tokio::{net::TcpStream, sync::Mutex};
+use tokio::net::TcpStream;
 use tracing::info;
 
-use crate::{connections::meta::Meta, packets::{Parser, StreamData}};
+use crate::{connections::meta::Meta, packets::Parser};
 
 use socket::{get_stream, stream_to_target_addr};
 

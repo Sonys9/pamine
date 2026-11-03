@@ -125,8 +125,11 @@ impl Parser {
         &self.threshold
     }
 
-    /// Resets the connection state machine and both buffers.
-    pub fn reset(&mut self, meta: &mut Meta) {
+    /// Resets the connection state machine and the per-direction buffers.
+    ///
+    /// Takes `&self` because the state and threshold are atomics: nothing here
+    /// needs exclusive access to the parser itself.
+    pub fn reset(&self, meta: &mut Meta) {
         self.state.set(State::Handshake);
         self.threshold.reset();
         meta.decompress_buffer.clear();
