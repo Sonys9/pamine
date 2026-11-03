@@ -71,6 +71,20 @@ pub async fn connection_side(
 /// body without a length prefix desynchronises the stream. A rewrite may emit
 /// several frames back to back — TCP is a byte stream, so the peer reads them
 /// one at a time, and one `write_all` is cheaper than one syscall per packet.
+///
+/// # Errors
+///
+/// Only *framing* errors are fatal. A body that fails to decode is not: the
+/// frame boundary is already known, so the packet can be forwarded untouched
+/// and the stream stays in sync. This matters because the decoder is not
+/// complete — an unknown or mis-modelled packet body must not kill a working
+/// connection.
+///
+/// The two cases are told apart by the read cursor: [`Parser::try_parse`]
+/// advances it as soon as the frame is validated, *before* dispatching the
+/// body. So a cursor that moved means the boundary is known and the error came
+/// from the body; a cursor that did not move means the frame itself is broken
+/// and the next boundary cannot be found.
 fn parse_packet<'a>(
     parser: &'a Arc<Parser>,
     side: Side,
@@ -80,6 +94,8 @@ fn parse_packet<'a>(
     // Read the threshold before `try_parse` borrows the parser: a hand-built
     // frame has to carry the same `data_len` header the peer expects.
     let threshold = parser.threshold();
+    let cursor_before = meta.stream_data.diff;
+
     match parser.try_parse(side, meta) {
         // `None` means the buffer holds only a partial packet;
         // wait for the next read instead of logging an error.
@@ -96,7 +112,13 @@ fn parse_packet<'a>(
                 e,
                 &buffer[..buffer.len().min(50)]
             );
-            return Err(e);
+            // The frame was validated and the cursor moved, so the packet
+            // boundary is known: forward the packet as-is and keep going.
+            // Only a frame-level failure leaves the cursor in place, and that
+            // one is unrecoverable.
+            if meta.stream_data.diff == cursor_before {
+                return Err(e);
+            }
         }
     };
     // Nothing was rewritten: forward the original bytes untouched.
