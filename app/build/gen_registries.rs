@@ -179,7 +179,32 @@ pub fn generate(registries: &[RegistryData]) -> String {
                 lit(name)
             ));
         }
-        out.push_str("];\n");
+        out.push_str("];\n\n");
+    }
+
+    // Named constants for the command argument parsers. The decoder has to
+    // branch on these ids, and hard-coding them is how the `score_holder` /
+    // `time` off-by-one happened: the numbers were right for one version and
+    // silently wrong for another. Generating them keeps the decoder and the
+    // registry in lockstep.
+    if let Some(parsers) = registries
+        .iter()
+        .find(|r| r.key == "minecraft:command_argument_type")
+    {
+        out.push_str("/// Ids of the `minecraft:command_argument_type` registry.\n");
+        out.push_str("pub mod command_argument_type {\n");
+        for (name, id) in &parsers.entries {
+            out.push_str(&format!(
+                "    pub const {}: i32 = {};\n",
+                upper_ident(name),
+                id
+            ));
+        }
+        out.push_str(&format!(
+            "\n    /// Number of parsers in the registry.\n    pub const COUNT: usize = {};\n",
+            parsers.entries.len()
+        ));
+        out.push_str("}\n");
     }
 
     out

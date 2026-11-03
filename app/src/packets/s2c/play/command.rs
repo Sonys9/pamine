@@ -7,7 +7,10 @@ use pcore::{
     errors::Error,
 };
 
-use crate::packets::{counted, optional_chat};
+use crate::{
+    ids::command_argument_type,
+    packets::{counted, optional_chat},
+};
 
 /// One entry of a tab-completion response.
 #[derive(Debug, Clone)]
@@ -334,10 +337,11 @@ impl Encode for CommandParser<'_> {
 
 /// Reads the properties of the parser with the given id.
 ///
-/// The ids are the `minecraft:command_argument_type` registry, which is dense
-/// `0..=47` in 1.19.2. Getting one wrong desynchronises the whole packet: the
-/// cursor lands mid-field and the next node is read from garbage, which shows
-/// up as `Invalid UTF-8` far away from the actual mistake.
+/// The ids come from [`command_argument_type`], which is generated from the
+/// `minecraft:command_argument_type` registry in `data/registries.json`. They
+/// are never spelled out here: getting one wrong does not fail locally, it
+/// shifts the cursor and the *next* node is read from garbage, which surfaces
+/// as `Invalid UTF-8` far away from the actual mistake.
 ///
 /// An unknown id is an error: the wiki is explicit that the rest of the packet
 /// cannot be unpacked once an unknown parser is met.
@@ -345,10 +349,12 @@ fn parser_properties<'a>(
     decoder: &mut Decoder<'a>,
     parser_id: i32,
 ) -> Result<CommandParser<'a>, Error> {
+    use command_argument_type as parser;
+
     Ok(match parser_id {
-        // brigadier:bool, and every parser without properties.
-        0 => CommandParser::None,
-        1 => {
+        // `brigadier:bool` and every parser without properties.
+        parser::BRIGADIER_BOOL => CommandParser::None,
+        parser::BRIGADIER_FLOAT => {
             let flags = decoder.u8()?;
             CommandParser::Float {
                 min: if flags & 0x01 != 0 {
@@ -363,7 +369,7 @@ fn parser_properties<'a>(
                 },
             }
         }
-        2 => {
+        parser::BRIGADIER_DOUBLE => {
             let flags = decoder.u8()?;
             CommandParser::Double {
                 min: if flags & 0x01 != 0 {
@@ -378,7 +384,7 @@ fn parser_properties<'a>(
                 },
             }
         }
-        3 => {
+        parser::BRIGADIER_INTEGER => {
             let flags = decoder.u8()?;
             CommandParser::Integer {
                 min: if flags & 0x01 != 0 {
@@ -393,7 +399,7 @@ fn parser_properties<'a>(
                 },
             }
         }
-        4 => {
+        parser::BRIGADIER_LONG => {
             let flags = decoder.u8()?;
             CommandParser::Long {
                 min: if flags & 0x01 != 0 {
@@ -408,27 +414,26 @@ fn parser_properties<'a>(
                 },
             }
         }
-        5 => CommandParser::String {
+        parser::BRIGADIER_STRING => CommandParser::String {
             behavior: decoder.varint()?,
         },
-        6 => CommandParser::Entity {
+        parser::ENTITY => CommandParser::Entity {
             flags: decoder.u8()?,
         },
-        // `minecraft:score_holder` — 0x01 allows multiple.
-        29 => CommandParser::ScoreHolder {
+        // 0x01 allows multiple targets.
+        parser::SCORE_HOLDER => CommandParser::ScoreHolder {
             flags: decoder.u8()?,
         },
-        // `minecraft:time` — minimum duration in ticks.
-        42 => CommandParser::Time {
+        // Minimum duration in ticks.
+        parser::TIME => CommandParser::Time {
             min: decoder.i32()?,
         },
-        // `minecraft:resource_or_tag` and `minecraft:resource` both carry the
-        // registry identifier they suggest from.
-        43..=44 => CommandParser::Resource {
+        // Both carry the registry identifier they suggest from.
+        parser::RESOURCE_OR_TAG | parser::RESOURCE => CommandParser::Resource {
             registry: decoder.string()?,
         },
-        // Every other 1.19.2 parser (7-28, 30-41, 45-47) has no properties.
-        7..=47 => CommandParser::None,
+        // Every other parser in the registry has no properties on the wire.
+        other if (0..parser::COUNT as i32).contains(&other) => CommandParser::None,
         other => return Err(Error::UnknownOpcode(other)),
     })
 }
@@ -436,99 +441,83 @@ fn parser_properties<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ids::COMMAND_ARGUMENT_TYPE_REGISTRY;
 
-    /// The ids are the `minecraft:command_argument_type` registry. A wrong id
-    /// here does not fail locally: it shifts the cursor and the *next* node is
-    /// read from garbage, which surfaces as `Invalid UTF-8` somewhere else in
-    /// the packet. So the ids are pinned explicitly.
+    /// Every parser id in the registry must be decodable, and the decoder must
+    /// consume exactly the bytes that parser carries on the wire.
+    ///
+    /// The expected byte counts are derived from the parser *name*, not from a
+    /// hard-coded id, so this test keeps working when the registry is updated
+    /// for a new Minecraft version.
     #[test]
-    fn parser_ids_match_the_1_19_2_registry() {
-        // (id, name, bytes of properties on the wire)
-        let cases: &[(i32, &str, &[u8])] = &[
-            (0, "brigadier:bool", &[]),
-            (1, "brigadier:float", &[0x00]),
-            (2, "brigadier:double", &[0x00]),
-            (3, "brigadier:integer", &[0x00]),
-            (4, "brigadier:long", &[0x00]),
-            (5, "brigadier:string", &[0x00]),
-            (6, "minecraft:entity", &[0x00]),
-            (7, "minecraft:game_profile", &[]),
-            (8, "minecraft:block_pos", &[]),
-            (9, "minecraft:column_pos", &[]),
-            (10, "minecraft:vec3", &[]),
-            (11, "minecraft:vec2", &[]),
-            (12, "minecraft:block_state", &[]),
-            (13, "minecraft:block_predicate", &[]),
-            (14, "minecraft:item_stack", &[]),
-            (15, "minecraft:item_predicate", &[]),
-            (16, "minecraft:color", &[]),
-            (17, "minecraft:component", &[]),
-            (18, "minecraft:message", &[]),
-            (19, "minecraft:nbt_compound_tag", &[]),
-            (20, "minecraft:nbt_tag", &[]),
-            (21, "minecraft:nbt_path", &[]),
-            (22, "minecraft:objective", &[]),
-            (23, "minecraft:objective_criteria", &[]),
-            (24, "minecraft:operation", &[]),
-            (25, "minecraft:particle", &[]),
-            (26, "minecraft:angle", &[]),
-            (27, "minecraft:rotation", &[]),
-            (28, "minecraft:scoreboard_slot", &[]),
-            (29, "minecraft:score_holder", &[0x00]),
-            (30, "minecraft:swizzle", &[]),
-            (31, "minecraft:team", &[]),
-            (32, "minecraft:item_slot", &[]),
-            (33, "minecraft:resource_location", &[]),
-            (34, "minecraft:mob_effect", &[]),
-            (35, "minecraft:function", &[]),
-            (36, "minecraft:entity_anchor", &[]),
-            (37, "minecraft:int_range", &[]),
-            (38, "minecraft:float_range", &[]),
-            (39, "minecraft:item_enchantment", &[]),
-            (40, "minecraft:entity_summon", &[]),
-            (41, "minecraft:dimension", &[]),
-            (42, "minecraft:time", &[0x00, 0x00, 0x00, 0x00]),
-            (43, "minecraft:resource_or_tag", &[0x00]),
-            (44, "minecraft:resource", &[0x00]),
-            (45, "minecraft:template_mirror", &[]),
-            (46, "minecraft:template_rotation", &[]),
-            (47, "minecraft:uuid", &[]),
-        ];
-
-        for (id, name, properties) in cases {
+    fn every_registry_parser_decodes_and_consumes_its_properties() {
+        for entry in COMMAND_ARGUMENT_TYPE_REGISTRY.entries {
+            let properties = properties_for(entry.name);
             let mut decoder = Decoder::new(properties);
-            let parsed = parser_properties(&mut decoder, *id)
-                .unwrap_or_else(|e| panic!("{name} (id {id}) failed to parse: {e}"));
+            let parsed = parser_properties(&mut decoder, entry.id as i32).unwrap_or_else(|e| {
+                panic!("{} (id {}) failed to parse: {e}", entry.name, entry.id)
+            });
             assert_eq!(
                 decoder.remaining(),
                 0,
-                "{name} (id {id}) left {} bytes unread, parsed as {parsed:?}",
+                "{} (id {}) left {} bytes unread, parsed as {parsed:?}",
+                entry.name,
+                entry.id,
                 decoder.remaining()
             );
         }
     }
 
-    /// The two ids that were wrong before: `score_holder` and `time` were
-    /// treated as property-less, and `resource_or_tag` was read as an `i32`.
+    /// The generated constants must agree with the registry they came from.
+    #[test]
+    fn generated_constants_match_the_registry() {
+        assert_eq!(
+            command_argument_type::COUNT,
+            COMMAND_ARGUMENT_TYPE_REGISTRY.len()
+        );
+        for entry in COMMAND_ARGUMENT_TYPE_REGISTRY.entries {
+            assert_eq!(
+                COMMAND_ARGUMENT_TYPE_REGISTRY.id_of(entry.name),
+                Some(entry.id)
+            );
+        }
+        // Spot-check the ids that were wrong before the fix.
+        assert_eq!(
+            COMMAND_ARGUMENT_TYPE_REGISTRY.name_of(command_argument_type::SCORE_HOLDER as u16),
+            Some("score_holder")
+        );
+        assert_eq!(
+            COMMAND_ARGUMENT_TYPE_REGISTRY.name_of(command_argument_type::TIME as u16),
+            Some("time")
+        );
+        assert_eq!(
+            COMMAND_ARGUMENT_TYPE_REGISTRY.name_of(command_argument_type::RESOURCE_OR_TAG as u16),
+            Some("resource_or_tag")
+        );
+    }
+
+    /// `score_holder` and `time` carry properties; treating them as
+    /// property-less shifted the cursor and corrupted the rest of the packet.
     #[test]
     fn score_holder_and_time_read_their_properties() {
         let mut decoder = Decoder::new(&[0x01]);
-        let parsed = parser_properties(&mut decoder, 29).unwrap();
+        let parsed = parser_properties(&mut decoder, command_argument_type::SCORE_HOLDER).unwrap();
         assert!(matches!(parsed, CommandParser::ScoreHolder { flags: 1 }));
         assert_eq!(decoder.remaining(), 0);
 
         let mut decoder = Decoder::new(&[0x00, 0x00, 0x00, 0x05]);
-        let parsed = parser_properties(&mut decoder, 42).unwrap();
+        let parsed = parser_properties(&mut decoder, command_argument_type::TIME).unwrap();
         assert!(matches!(parsed, CommandParser::Time { min: 5 }));
         assert_eq!(decoder.remaining(), 0);
     }
 
-    /// `resource_or_tag` (43) carries a registry string, not an `i32`.
+    /// `resource_or_tag` carries a registry string, not an `i32`.
     #[test]
     fn resource_or_tag_reads_a_registry_string() {
         // VarInt length 4 followed by "item".
         let mut decoder = Decoder::new(&[0x04, b'i', b't', b'e', b'm']);
-        let parsed = parser_properties(&mut decoder, 43).unwrap();
+        let parsed =
+            parser_properties(&mut decoder, command_argument_type::RESOURCE_OR_TAG).unwrap();
         match parsed {
             CommandParser::Resource { registry } => assert_eq!(registry, "item"),
             other => panic!("expected Resource, got {other:?}"),
@@ -536,12 +525,44 @@ mod tests {
         assert_eq!(decoder.remaining(), 0);
     }
 
-    /// `template_mirror` (45) has no properties, so nothing may be consumed.
+    /// `template_mirror` has no properties, so nothing may be consumed.
     #[test]
     fn template_mirror_has_no_properties() {
         let mut decoder = Decoder::new(&[]);
-        let parsed = parser_properties(&mut decoder, 45).unwrap();
+        let parsed =
+            parser_properties(&mut decoder, command_argument_type::TEMPLATE_MIRROR).unwrap();
         assert!(matches!(parsed, CommandParser::None));
         assert_eq!(decoder.remaining(), 0);
+    }
+
+    /// An id outside the registry is an error, not a silent "no properties".
+    #[test]
+    fn unknown_parser_id_is_an_error() {
+        let mut decoder = Decoder::new(&[]);
+        let id = command_argument_type::COUNT as i32;
+        assert!(parser_properties(&mut decoder, id).is_err());
+    }
+
+    /// The bytes each parser carries on the wire, keyed by registry name.
+    ///
+    /// Only the parsers with properties need real bytes; the rest must consume
+    /// nothing, so an empty slice is the correct expectation for them.
+    fn properties_for(name: &str) -> &'static [u8] {
+        match name {
+            // A flags byte, then optional min/max.
+            "brigadier:float" | "brigadier:double" | "brigadier:integer" | "brigadier:long" => {
+                &[0x00]
+            }
+            // A VarInt behaviour.
+            "brigadier:string" => &[0x00],
+            // A flags byte.
+            "entity" | "score_holder" => &[0x00],
+            // An i32 minimum.
+            "time" => &[0x00, 0x00, 0x00, 0x00],
+            // A VarInt-prefixed registry identifier.
+            "resource_or_tag" | "resource" => &[0x00],
+            // Everything else has no properties on the wire.
+            _ => &[],
+        }
     }
 }
