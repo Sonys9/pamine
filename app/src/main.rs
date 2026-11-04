@@ -9,6 +9,7 @@ mod buffer;
 mod connections;
 mod ids;
 mod packets;
+mod scripts;
 
 #[tokio::main]
 async fn main() {
@@ -31,6 +32,9 @@ async fn main() {
         .unwrap_or_else(|e| panic!("Failed to start the listener on {bind_addr}: {e}"));
 
     info!("listening on {bind_addr}");
+
+    // info!("Running the lua script");
+    // scripts::run(include_str!("scripts/test_script.lua")).await.unwrap();
 
     loop {
         let (stream, addr) = match listener.accept().await {

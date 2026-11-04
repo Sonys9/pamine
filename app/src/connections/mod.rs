@@ -15,6 +15,7 @@
 mod injection;
 pub mod meta;
 mod relay;
+mod rewrite;
 mod socket;
 mod testing_will_be_removed;
 
@@ -62,6 +63,8 @@ impl Connector {
         // For sending custom packets
         let (source_tx, source_rx) = mpsc::channel::<Injection>(64);
         let (target_tx, target_rx) = mpsc::channel::<Injection>(64);
+        let (s2t_tx, t2s_tx) = (target_tx.clone(), source_tx.clone());
+        // mpsc::Sender clone is cheap
 
         // One parser is shared by both directions: the state machine and the
         // compression threshold are per-connection, not per-direction.
@@ -73,14 +76,14 @@ impl Connector {
                 self.local_addr,
                 parser.clone(),
                 Meta::new(),
-                Channel::new(source_rx, target_tx)
+                Channel::new(source_rx, source_tx, s2t_tx)
             ) => res,
             res = relay::connection_side(
                 Stream::new(target_stream_reader, stream_writer),
                 self.local_addr,
                 parser,
                 Meta::new(),
-                Channel::new(target_rx, source_tx)
+                Channel::new(target_rx, target_tx, t2s_tx)
             ) => res,
         }
     }
@@ -89,11 +92,20 @@ impl Connector {
 pub struct Channel {
     pub rx: Receiver<Injection>,
     pub tx: Sender<Injection>,
+    pub neighbour_tx: Sender<Injection>,
 }
 
 impl Channel {
-    fn new(rx: Receiver<Injection>, tx: Sender<Injection>) -> Self {
-        Self { rx, tx }
+    fn new(
+        rx: Receiver<Injection>,
+        tx: Sender<Injection>,
+        neighbour_tx: Sender<Injection>,
+    ) -> Self {
+        Self {
+            rx,
+            tx,
+            neighbour_tx,
+        }
     }
 }
 

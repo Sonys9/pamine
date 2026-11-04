@@ -1,37 +1,35 @@
 //! The per-direction relay loop: read, parse, write.
 //!
-//! One task owns each direction, and that task is the only writer of its
-//! socket half. That is the whole safety argument: TCP is a byte stream, so the
-//! only way to corrupt it is to interleave two writers or to write a partial
-//! frame. Both are impossible here — every write is a complete frame, and every
-//! write happens in this task.
+//! One task owns each direction, and that task is the only writer of its socket
+//! half. That is the whole safety argument: TCP is a byte stream, so the only
+//! way to corrupt it is to interleave two writers or to write a partial frame.
+//! Both are impossible here — every write is a complete frame, and every write
+//! happens in this task.
 //!
 //! Injected packets arrive on a channel and are written by the same task, so
-//! they cannot interleave with real traffic either. They do not need to wait
-//! for a real packet to arrive: a partial packet lives in `meta.stream_data`,
-//! not in the socket, so writing an injection in between reads is safe.
+//! they cannot interleave with real traffic either. They do not need to wait for
+//! a real packet to arrive: a partial packet lives in `meta.stream_data`, not in
+//! the socket, so writing an injection in between reads is safe.
+//!
+//! What to do with a parsed packet is decided in [`super::rewrite`]; this module
+//! only moves bytes.
 
 use std::{borrow::Cow, net::SocketAddr, sync::Arc};
 
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    sync::mpsc::Sender,
-};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tracing::error;
 
 use crate::{
-    connections::{Channel, Injection, Stream, meta::Meta},
-    packets::{Packet, Parsed, Parser, Side},
+    connections::{Channel, Injection, Stream, meta::Meta, rewrite},
+    packets::{Parsed, Parser, Side},
 };
-
-use super::testing_will_be_removed::on_packet;
 
 /// Relays one direction of the connection until either side closes.
 ///
 /// `stream` is the side being read from and `stream.tx` the side being written
-/// to, so the same function serves both directions. Which one it is gets
-/// decided from the local address: the listener binds `local_addr`, so a socket
-/// whose peer is `local_addr` is the client->server direction.
+/// to, so the same function serves both directions. Which one it is gets decided
+/// from the local address: the listener binds `local_addr`, so a socket whose
+/// peer is `local_addr` is the client->server direction.
 pub async fn connection_side(
     mut stream: Stream,
     local_addr: SocketAddr,
@@ -61,7 +59,7 @@ pub async fn connection_side(
                         target_addr,
                     );
                 }
-                forward_real(&parser, side, &mut meta, &mut stream, &buffer[..len], &mut channel.tx).await?;
+                forward_real(&parser, side, &mut meta, &mut stream, &buffer[..len], &mut channel).await?;
             }
 
             // `recv` is cancel-safe too. A closed channel is fatal: it lives as
@@ -69,7 +67,7 @@ pub async fn connection_side(
             injection = channel.rx.recv() => {
                 let injection = injection
                     .ok_or_else(|| eyre::eyre!("The injection channel is closed"))?;
-                forward_injected(&parser, side, &mut meta, &mut stream, injection, &mut channel.tx).await?;
+                forward_injected(&parser, side, &mut meta, &mut stream, injection, &mut channel).await?;
             }
         }
     }
@@ -77,17 +75,17 @@ pub async fn connection_side(
 
 /// Forwards every complete packet currently sitting in the receive buffer.
 ///
-/// One `read` can carry several packets, so the buffer is drained completely.
-/// A framing error is fatal: the next packet boundary cannot be found, so the
-/// stream is unrecoverable. A body that fails to decode is not — the boundary
-/// is known, so the frame is forwarded untouched and the loop continues.
+/// One `read` can carry several packets, so the buffer is drained completely. A
+/// framing error is fatal: the next packet boundary cannot be found, so the
+/// stream is unrecoverable. A body that fails to decode is not — the boundary is
+/// known, so the frame is forwarded untouched and the loop continues.
 async fn forward_real(
     parser: &Arc<Parser>,
     side: Side,
     meta: &mut Meta,
     stream: &mut Stream,
     bytes: &[u8],
-    channel_tx: &mut Sender<Injection>,
+    channel: &mut Channel,
 ) -> eyre::Result<()> {
     meta.stream_data.update(bytes)?;
 
@@ -100,7 +98,15 @@ async fn forward_real(
 
         let frame = match parsed {
             Parsed::Packet { packet, frame, .. } => {
-                on_parsed_packet(packet, parser, channel_tx, frame, false).await
+                rewrite::apply(
+                    packet,
+                    parser,
+                    &channel.tx,
+                    &channel.neighbour_tx,
+                    frame,
+                    false,
+                )
+                .await
             }
             Parsed::BodyError { error, frame, .. } => {
                 log_body_error(side, &error, bytes);
@@ -125,9 +131,9 @@ async fn forward_injected(
     meta: &mut Meta,
     stream: &mut Stream,
     mut injection: Injection,
-    channel_tx: &mut Sender<Injection>,
+    channel: &mut Channel,
 ) -> eyre::Result<()> {
-    while !injection.bytes.is_empty() {
+    while !injection.is_empty() {
         let parsed = parser.parse_injected(side, &injection.bytes, &mut meta.decompress_buffer)?;
         let Some(consumed) = parsed.consumed() else {
             error!(
@@ -139,7 +145,15 @@ async fn forward_injected(
 
         let frame = match parsed {
             Parsed::Packet { packet, frame, .. } if injection.changeable => {
-                on_parsed_packet(packet, parser, channel_tx, frame, true).await
+                rewrite::apply(
+                    packet,
+                    parser,
+                    &channel.tx,
+                    &channel.neighbour_tx,
+                    frame,
+                    true,
+                )
+                .await
             }
             Parsed::Packet { frame, .. } => Cow::Borrowed(frame),
             Parsed::BodyError { error, frame, .. } => {
@@ -162,32 +176,4 @@ fn log_body_error(side: Side, error: &eyre::Report, bytes: &[u8]) {
         error,
         &bytes[..bytes.len().min(50)]
     );
-}
-
-/// Runs the rewrite hook and applies its result.
-///
-/// The injection is queued with `try_send`, not `send().await`: the channel
-/// belongs to the *other* relay, and blocking here would let a slow peer stall
-/// this direction too. A full queue means the injector is producing faster than
-/// the peer consumes, so the packet is dropped and logged rather than turning
-/// into backpressure on the real stream.
-async fn on_parsed_packet<'a>(
-    packet: Packet<'a>,
-    parser: &Arc<Parser>,
-    channel_tx: &mut Sender<Injection>,
-    packet_bytes: &'a [u8],
-    is_injected: bool,
-) -> Cow<'a, [u8]> {
-    let update = on_packet(&packet, parser.threshold(), is_injected);
-
-    if let Some(inject) = update.inject
-        && let Err(e) = channel_tx.try_send(inject)
-    {
-        error!("dropping an injected packet: {e}");
-    }
-
-    match update.change_with {
-        Some(rewritten) => Cow::Owned(rewritten.bytes),
-        None => Cow::Borrowed(packet_bytes),
-    }
 }
