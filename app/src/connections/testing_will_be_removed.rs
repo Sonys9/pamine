@@ -32,7 +32,7 @@ use crate::{
 ///
 /// Errors are logged and turned into [`Update::none`]: a broken rewrite must not
 /// take the connection down.
-pub fn on_packet(packet: &Packet<'_>, threshold: &UnsureThreshold) -> Update {
+pub fn on_packet(packet: &Packet<'_>, threshold: &UnsureThreshold, is_injected: bool) -> Update {
     // ===========
     match packet {
         S2C(S2CPacket::Play(s2c::play::Play::ChunkDataAndUpdateLight(_))) => return Update::none(),

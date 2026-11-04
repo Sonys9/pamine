@@ -100,7 +100,7 @@ async fn forward_real(
 
         let frame = match parsed {
             Parsed::Packet { packet, frame, .. } => {
-                on_parsed_packet(packet, parser, channel_tx, frame).await
+                on_parsed_packet(packet, parser, channel_tx, frame, false).await
             }
             Parsed::BodyError { error, frame, .. } => {
                 log_body_error(side, &error, bytes);
@@ -139,7 +139,7 @@ async fn forward_injected(
 
         let frame = match parsed {
             Parsed::Packet { packet, frame, .. } if injection.changeable => {
-                on_parsed_packet(packet, parser, channel_tx, frame).await
+                on_parsed_packet(packet, parser, channel_tx, frame, true).await
             }
             Parsed::Packet { frame, .. } => Cow::Borrowed(frame),
             Parsed::BodyError { error, frame, .. } => {
@@ -176,8 +176,9 @@ async fn on_parsed_packet<'a>(
     parser: &Arc<Parser>,
     channel_tx: &mut Sender<Injection>,
     packet_bytes: &'a [u8],
+    is_injected: bool,
 ) -> Cow<'a, [u8]> {
-    let update = on_packet(&packet, parser.threshold());
+    let update = on_packet(&packet, parser.threshold(), is_injected);
 
     if let Some(inject) = update.inject
         && let Err(e) = channel_tx.try_send(inject)
