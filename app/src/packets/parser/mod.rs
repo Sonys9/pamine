@@ -112,10 +112,13 @@ impl Parser {
         let mut decoder = Decoder::new(body);
         let opcode = decoder.varint()?.get();
 
-        // Advance only after the frame was fully validated. Assign the field
-        // directly: `stream.advance(..)` would re-borrow the whole struct while
-        // `pending` still holds a shared borrow of `stream.buffer`.
-        meta.stream_data.diff += consumed;
+        // Only if it's a real packet
+        if custom.is_none() {
+            // Advance only after the frame was fully validated. Assign the field
+            // directly: `stream.advance(..)` would re-borrow the whole struct while
+            // `pending` still holds a shared borrow of `stream.buffer`.
+            meta.stream_data.diff += consumed;
+        };
 
         let state = self.state.get();
         let packet = match state {

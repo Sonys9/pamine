@@ -46,8 +46,8 @@ pub async fn connection_side(
                     &mut stream,
                     &buffer
                 ).await?,
-            packet = channel.rx.recv() => {
-                while let Some(packet) = parse_packet(&parser, side, &[], &mut meta, &packet)? {
+            packet = channel.rx.recv(), if !channel.rx.is_closed() => {
+                if let Some(packet) = parse_packet(&parser, side, &[], &mut meta, &packet)? {
                     stream.tx.write_all(&packet).await?;
                 }
             }
@@ -123,7 +123,7 @@ fn parse_packet<'a>(
     side: Side,
     buffer: &[u8], // used only for error logging
     meta: &'a mut Meta,
-    custom: &Option<Vec<u8>>,
+    custom: &'a Option<Vec<u8>>,
 ) -> eyre::Result<Option<Cow<'a, [u8]>>> {
     // Read the threshold before `try_parse` borrows the parser: a hand-built
     // frame has to carry the same `data_len` header the peer expects.
@@ -155,6 +155,10 @@ fn parse_packet<'a>(
             }
         }
     };
+
     // Nothing was rewritten: forward the original bytes untouched.
-    Ok(Some(Cow::Borrowed(meta.stream_data.packet_bytes())))
+    Ok(Some(Cow::Borrowed(match custom {
+        None => meta.stream_data.packet_bytes(),
+        Some(bytes) => bytes,
+    })))
 }

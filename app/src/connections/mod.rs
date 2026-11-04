@@ -23,8 +23,7 @@ use tokio::{
     net::{
         TcpStream,
         tcp::{OwnedReadHalf, OwnedWriteHalf},
-    },
-    sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
+    }, sync::mpsc::{self, Receiver, Sender},
 };
 use tracing::info;
 
@@ -57,8 +56,8 @@ impl Connector {
         let (target_stream_reader, target_stream_writer) = target_stream.into_split();
 
         // For sending custom packets
-        let (source_tx, source_rx) = mpsc::unbounded_channel::<Vec<u8>>();
-        let (target_tx, target_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+        let (source_tx, source_rx) = mpsc::channel::<Vec<u8>>(64);
+        let (target_tx, target_rx) = mpsc::channel::<Vec<u8>>(64);
 
         // One parser is shared by both directions: the state machine and the
         // compression threshold are per-connection, not per-direction.
@@ -84,12 +83,12 @@ impl Connector {
 }
 
 pub struct Channel {
-    pub rx: UnboundedReceiver<Vec<u8>>,
-    pub tx: UnboundedSender<Vec<u8>>,
+    pub rx: Receiver<Vec<u8>>,
+    pub tx: Sender<Vec<u8>>,
 }
 
 impl Channel {
-    fn new(rx: UnboundedReceiver<Vec<u8>>, tx: UnboundedSender<Vec<u8>>) -> Self {
+    fn new(rx: Receiver<Vec<u8>>, tx: Sender<Vec<u8>>) -> Self {
         Self { rx, tx }
     }
 }
