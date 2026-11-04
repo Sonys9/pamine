@@ -108,7 +108,7 @@ impl Parser {
         // `pending` still holds a shared borrow of `stream.buffer`.
         meta.stream_data.diff += consumed;
 
-        Ok(self.decode_body(side, body, consumed))
+        Ok(self.decode_body(side, body, &pending[..consumed], consumed))
     }
 
     /// Parses one injected frame.
@@ -126,10 +126,10 @@ impl Parser {
     pub fn parse_injected<'a>(
         &'a self,
         side: Side,
-        frame: &'a [u8],
+        bytes: &'a [u8],
         scratch: &'a mut Vec<u8>,
     ) -> eyre::Result<Parsed<'a>> {
-        let Some(frame) = Frame::split(frame, &self.threshold)? else {
+        let Some(frame) = Frame::split(bytes, &self.threshold)? else {
             return Ok(Parsed::Incomplete);
         };
         let consumed = frame.consumed;
@@ -143,17 +143,28 @@ impl Parser {
             frame.body
         };
 
-        Ok(self.decode_body(side, body, consumed))
+        Ok(self.decode_body(side, body, &bytes[..consumed], consumed))
     }
 
     /// Shared tail of both parse paths: opcode, dispatch, error mapping.
-    fn decode_body<'a>(&'a self, side: Side, body: &'a [u8], consumed: usize) -> Parsed<'a> {
+    ///
+    /// `frame` is the complete frame the body came from, carried through so the
+    /// caller can forward it untouched without borrowing the receive buffer a
+    /// second time.
+    fn decode_body<'a>(
+        &'a self,
+        side: Side,
+        body: &'a [u8],
+        frame: &'a [u8],
+        consumed: usize,
+    ) -> Parsed<'a> {
         let mut decoder = Decoder::new(body);
         let opcode = match decoder.varint() {
             Ok(opcode) => opcode.get(),
             Err(error) => {
                 return Parsed::BodyError {
                     error: error.into(),
+                    frame,
                     consumed,
                 };
             }
@@ -168,7 +179,11 @@ impl Parser {
         };
 
         match packet {
-            Ok(packet) => Parsed::Packet { packet, consumed },
+            Ok(packet) => Parsed::Packet {
+                packet,
+                frame,
+                consumed,
+            },
             Err(error) => {
                 // A body that fails to decode is not fatal: the frame boundary
                 // is known, so the caller can skip it. Log the opcode so a
@@ -180,7 +195,11 @@ impl Parser {
                     body_len = body.len(),
                     "failed to decode packet body: {error}"
                 );
-                Parsed::BodyError { error, consumed }
+                Parsed::BodyError {
+                    error,
+                    frame,
+                    consumed,
+                }
             }
         }
     }

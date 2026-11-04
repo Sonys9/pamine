@@ -13,9 +13,11 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use pcore::encode;
-use tracing::info;
+use tokio::sync::mpsc::Sender;
+use tracing::{error, info};
 
 use crate::{
+    connections::{Injection, injection::Update},
     ids,
     packets::{
         Packet::{self, C2S},
@@ -23,7 +25,7 @@ use crate::{
         c2s::{
             self,
             packets::C2SPacket,
-            play::{ChatCommand, ChatMessage, SetCreativeModeSlot},
+            play::{ChatCommand, ChatMessage, SetCreativeModeSlot, SetPlayerPosition},
         },
         frame_packet,
     },
@@ -32,25 +34,40 @@ use crate::{
 /// Decides whether a packet should be rewritten.
 ///
 /// Returns the replacement frames, or `None` to forward the original packet.
-pub fn on_packet(packet: &Packet<'_>, threshold: &UnsureThreshold) -> Option<Vec<u8>> {
-    match packet {
+pub fn on_packet(packet: &Packet<'_>, threshold: &UnsureThreshold) -> Update {
+    match match packet {
         C2S(C2SPacket::Play(c2s::play::Play::ChatMessage(message))) => {
             on_message(message, threshold)
         }
         C2S(C2SPacket::Play(c2s::play::Play::SetCreativeModeSlot(packet))) => {
-            on_creative_slot(packet);
-            None
+            on_creative_slot(packet)
         }
-        _ => None,
+        _ => Ok(Update {
+            change_with: None,
+            inject: None,
+        }),
+    } {
+        Ok(update) => update,
+        Err(e) => {
+            error!("On packet error: {}", e);
+            Update {
+                change_with: None,
+                inject: None,
+            }
+        }
     }
 }
 
-fn on_creative_slot(packet: &SetCreativeModeSlot) {
+fn on_creative_slot(packet: &SetCreativeModeSlot) -> eyre::Result<Update> {
     info!("Packet: {:?}", packet);
     info!("Item: {:?}", packet.clicked_item);
     if let Some(item_id) = packet.clicked_item.item_id {
         info!("Item: {:?}", ids::Item::by_id(item_id.get() as u16));
     };
+    Ok(Update {
+        change_with: None,
+        inject: None,
+    })
 }
 
 /// Rewrites a chat message.
@@ -58,19 +75,46 @@ fn on_creative_slot(packet: &SetCreativeModeSlot) {
 /// Each body is wrapped back into the enum and encoded as a whole, so the opcode
 /// comes from `#[id(0x05)]` on `Play::ChatMessage` and is never spelled out by
 /// hand.
-fn on_message(packet: &ChatMessage<'_>, threshold: &UnsureThreshold) -> Option<Vec<u8>> {
+fn on_message(packet: &ChatMessage<'_>, threshold: &UnsureThreshold) -> eyre::Result<Update> {
     info!("The local player just typed '{}'", packet.message);
-    if packet.message != "Info" {
-        return None;
-    };
 
+    match packet.message {
+        "info" => info(packet, threshold),
+        "change my position" => change_pos(threshold),
+        _ => Ok(Update {
+            change_with: None,
+            inject: None,
+        }),
+    }
+}
+
+fn change_pos(threshold: &UnsureThreshold) -> eyre::Result<Update> {
+    let mut result: Vec<u8> = Vec::new();
+    let new_position = SetPlayerPosition {
+        x: 10.,
+        feet_y: 100.,
+        z: 10.,
+        on_ground: false,
+    };
+    let new_position_packet = encode(&c2s::play::Play::SetPlayerPosition(new_position));
+    result.extend_from_slice(&frame_packet(&new_position_packet, threshold)?);
+    Ok(Update {
+        change_with: None,
+        inject: Some(Injection {
+            bytes: result,
+            changeable: true,
+        }),
+    })
+}
+
+fn info(packet: &ChatMessage<'_>, threshold: &UnsureThreshold) -> eyre::Result<Update> {
     let messages = ["This message was just spoofed!", "Using a command '/?'."];
     let mut result = Vec::new();
     for message in messages {
         let mut packet = packet.clone();
         packet.message = message;
         let message_packet = encode(&c2s::play::Play::ChatMessage(packet));
-        result.extend_from_slice(&frame_packet(&message_packet, threshold).ok()?);
+        result.extend_from_slice(&frame_packet(&message_packet, threshold)?);
     }
 
     let now = SystemTime::now()
@@ -85,7 +129,9 @@ fn on_message(packet: &ChatMessage<'_>, threshold: &UnsureThreshold) -> Option<V
         signed_preview: false,
         last_seen_messages: &[0, 0],
     }));
-    result.extend_from_slice(&frame_packet(&command_packet, threshold).ok()?);
-
-    Some(result)
+    result.extend_from_slice(&frame_packet(&command_packet, threshold)?);
+    Ok(Update {
+        change_with: Some(result),
+        inject: None,
+    })
 }

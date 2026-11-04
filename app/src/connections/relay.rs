@@ -13,12 +13,15 @@
 
 use std::{borrow::Cow, net::SocketAddr, sync::Arc};
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    sync::mpsc::Sender,
+};
 use tracing::error;
 
 use crate::{
     connections::{Channel, Injection, Stream, meta::Meta},
-    packets::{Parsed, Parser, Side},
+    packets::{Packet, Parsed, Parser, Side},
 };
 
 use super::testing_will_be_removed::on_packet;
@@ -58,7 +61,7 @@ pub async fn connection_side(
                         target_addr,
                     );
                 }
-                forward_real(&parser, side, &mut meta, &mut stream, &buffer[..len]).await?;
+                forward_real(&parser, side, &mut meta, &mut stream, &buffer[..len], &mut channel.tx).await?;
             }
 
             // `recv` is cancel-safe too. A closed channel is fatal: it lives as
@@ -66,7 +69,7 @@ pub async fn connection_side(
             injection = channel.rx.recv() => {
                 let injection = injection
                     .ok_or_else(|| eyre::eyre!("The injection channel is closed"))?;
-                forward_injected(&parser, side, &mut meta, &mut stream, injection).await?;
+                forward_injected(&parser, side, &mut meta, &mut stream, injection, &mut channel.tx).await?;
             }
         }
     }
@@ -84,6 +87,7 @@ async fn forward_real(
     meta: &mut Meta,
     stream: &mut Stream,
     bytes: &[u8],
+    channel_tx: &mut Sender<Injection>,
 ) -> eyre::Result<()> {
     meta.stream_data.update(bytes)?;
 
@@ -94,17 +98,17 @@ async fn forward_real(
             return Ok(());
         }
 
-        // The borrow of `meta.stream_data` has to end before `clear()`, so the
-        // write happens inside this block and the buffer is compacted after.
+        // `Parsed` carries the frame, so the receive buffer is not borrowed a
+        // second time here. The borrow still has to end before `clear()`, hence
+        // the inner block.
         {
             let frame = match parsed {
-                Parsed::Packet { packet, .. } => match on_packet(&packet, parser.threshold()) {
-                    Some(rewritten) => Cow::Owned(rewritten),
-                    None => Cow::Borrowed(meta.stream_data.packet_bytes()),
-                },
-                Parsed::BodyError { error, .. } => {
+                Parsed::Packet { packet, frame, .. } => {
+                    on_parsed_packet(packet, parser, channel_tx, frame).await
+                }
+                Parsed::BodyError { error, frame, .. } => {
                     log_body_error(side, &error, bytes);
-                    Cow::Borrowed(meta.stream_data.packet_bytes())
+                    Cow::Borrowed(frame)
                 }
                 Parsed::Incomplete => unreachable!("consumed() returned Some for Incomplete"),
             };
@@ -126,6 +130,7 @@ async fn forward_injected(
     meta: &mut Meta,
     stream: &mut Stream,
     mut injection: Injection,
+    channel_tx: &mut Sender<Injection>,
 ) -> eyre::Result<()> {
     while !injection.bytes.is_empty() {
         let parsed = parser.parse_injected(side, &injection.bytes, &mut meta.decompress_buffer)?;
@@ -138,16 +143,13 @@ async fn forward_injected(
         };
 
         let frame = match parsed {
-            Parsed::Packet { packet, .. } if injection.changeable => {
-                match on_packet(&packet, parser.threshold()) {
-                    Some(rewritten) => Cow::Owned(rewritten),
-                    None => Cow::Borrowed(&injection.bytes[..consumed]),
-                }
+            Parsed::Packet { packet, frame, .. } if injection.changeable => {
+                on_parsed_packet(packet, parser, channel_tx, frame).await
             }
-            Parsed::Packet { .. } => Cow::Borrowed(&injection.bytes[..consumed]),
-            Parsed::BodyError { error, .. } => {
+            Parsed::Packet { frame, .. } => Cow::Borrowed(frame),
+            Parsed::BodyError { error, frame, .. } => {
                 log_body_error(side, &error, &injection.bytes);
-                Cow::Borrowed(&injection.bytes[..consumed])
+                Cow::Borrowed(frame)
             }
             Parsed::Incomplete => unreachable!("consumed() returned Some for Incomplete"),
         };
@@ -165,4 +167,20 @@ fn log_body_error(side: Side, error: &eyre::Report, bytes: &[u8]) {
         error,
         &bytes[..bytes.len().min(50)]
     );
+}
+
+async fn on_parsed_packet<'a>(
+    packet: Packet<'a>,
+    parser: &Arc<Parser>,
+    channel_tx: &mut Sender<Injection>,
+    packet_bytes: &'a [u8],
+) -> Cow<'a, [u8]> {
+    let update = on_packet(&packet, parser.threshold());
+    if let Some(inject) = update.inject {
+        channel_tx.send(inject).await;
+    };
+    match update.change_with {
+        Some(rewritten) => Cow::Owned(rewritten),
+        None => Cow::Borrowed(packet_bytes),
+    }
 }

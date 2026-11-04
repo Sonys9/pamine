@@ -16,6 +16,12 @@ pub enum Parsed<'a> {
     /// A frame was decoded successfully.
     Packet {
         packet: Packet<'a>,
+        /// The complete frame, `len:VarInt [data_len:VarInt] body`, ready to be
+        /// forwarded as-is when the packet is not rewritten.
+        ///
+        /// Carried here so the caller never has to borrow the receive buffer a
+        /// second time: `try_parse` already holds it for the packet's lifetime.
+        frame: &'a [u8],
         /// How many bytes of the input this frame occupied.
         consumed: usize,
     },
@@ -27,6 +33,8 @@ pub enum Parsed<'a> {
     /// must not kill a working connection.
     BodyError {
         error: eyre::Report,
+        /// The complete frame, forwarded untouched.
+        frame: &'a [u8],
         consumed: usize,
     },
 }
