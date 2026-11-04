@@ -48,7 +48,7 @@ fn parses_single_packet() {
     let mut meta = Meta::new();
     meta.stream_data.update(&frame(&handshake_body(2))).unwrap();
 
-    assert!(parser.try_parse(Side::C2S, &mut meta).unwrap().is_some());
+    assert!(parser.try_parse(Side::C2S, &mut meta, &None).unwrap().is_some());
     assert_eq!(parser.state(), State::Login);
     assert!(meta.stream_data.is_empty());
 }
@@ -60,7 +60,7 @@ fn parses_two_packets_from_one_read() {
     // Handshake with next_state=1 moves us to Status, where the state does
     // not change again, so both following packets parse the same way.
     meta.stream_data.update(&frame(&handshake_body(1))).unwrap();
-    assert!(parser.try_parse(Side::C2S, &mut meta).unwrap().is_some());
+    assert!(parser.try_parse(Side::C2S, &mut meta, &None).unwrap().is_some());
     meta.stream_data.clear();
     assert_eq!(parser.state(), State::Status);
 
@@ -69,9 +69,9 @@ fn parses_two_packets_from_one_read() {
     bytes.extend_from_slice(&frame(&[0x00]));
     meta.stream_data.update(&bytes).unwrap();
 
-    assert!(parser.try_parse(Side::C2S, &mut meta).unwrap().is_some());
+    assert!(parser.try_parse(Side::C2S, &mut meta, &None).unwrap().is_some());
     meta.stream_data.clear();
-    assert!(parser.try_parse(Side::C2S, &mut meta).unwrap().is_some());
+    assert!(parser.try_parse(Side::C2S, &mut meta, &None).unwrap().is_some());
     meta.stream_data.clear();
     assert!(meta.stream_data.is_empty());
 }
@@ -83,7 +83,7 @@ fn incomplete_packet_returns_none() {
     let full = frame(&handshake_body(2));
     meta.stream_data.update(&full[..full.len() - 1]).unwrap();
 
-    assert!(parser.try_parse(Side::C2S, &mut meta).unwrap().is_none());
+    assert!(parser.try_parse(Side::C2S, &mut meta, &None).unwrap().is_none());
     // Nothing was consumed, so the bytes are still there.
     assert!(!meta.stream_data.is_empty());
 }
@@ -92,7 +92,7 @@ fn incomplete_packet_returns_none() {
 fn empty_buffer_returns_none() {
     let parser = Parser::new();
     let mut meta = Meta::new();
-    assert!(parser.try_parse(Side::C2S, &mut meta).unwrap().is_none());
+    assert!(parser.try_parse(Side::C2S, &mut meta, &None).unwrap().is_none());
 }
 
 #[test]
@@ -103,10 +103,10 @@ fn fragmented_packet_completes_after_second_read() {
     let (a, b) = full.split_at(5);
 
     meta.stream_data.update(a).unwrap();
-    assert!(parser.try_parse(Side::C2S, &mut meta).unwrap().is_none());
+    assert!(parser.try_parse(Side::C2S, &mut meta, &None).unwrap().is_none());
 
     meta.stream_data.update(b).unwrap();
-    assert!(parser.try_parse(Side::C2S, &mut meta).unwrap().is_some());
+    assert!(parser.try_parse(Side::C2S, &mut meta, &None).unwrap().is_some());
 }
 
 #[test]
@@ -114,7 +114,7 @@ fn negative_length_is_an_error() {
     let parser = Parser::new();
     let mut meta = Meta::new();
     meta.stream_data.update(&varint(-1)).unwrap();
-    assert!(parser.try_parse(Side::C2S, &mut meta).is_err());
+    assert!(parser.try_parse(Side::C2S, &mut meta, &None).is_err());
 }
 
 #[test]
@@ -122,7 +122,7 @@ fn reset_restores_initial_state() {
     let parser = Parser::new();
     let mut meta = Meta::new();
     meta.stream_data.update(&frame(&handshake_body(2))).unwrap();
-    parser.try_parse(Side::C2S, &mut meta).unwrap();
+    parser.try_parse(Side::C2S, &mut meta, &None).unwrap();
     assert_eq!(parser.state(), State::Login);
 
     parser.reset(&mut meta);
@@ -138,7 +138,7 @@ fn sides_are_independent() {
     c2s.stream_data.update(&frame(&handshake_body(2))).unwrap();
 
     // Bytes on C2S must not be visible on S2C.
-    assert!(parser.try_parse(Side::S2C, &mut s2c).unwrap().is_none());
+    assert!(parser.try_parse(Side::S2C, &mut s2c, &None).unwrap().is_none());
     assert!(!c2s.stream_data.is_empty());
 }
 
@@ -295,7 +295,7 @@ fn frame_packet_round_trips_through_the_parser() {
     let framed = frame_packet(&body, &uncompressed()).unwrap();
     meta.stream_data.update(&framed).unwrap();
 
-    assert!(parser.try_parse(Side::C2S, &mut meta).unwrap().is_some());
+    assert!(parser.try_parse(Side::C2S, &mut meta, &None).unwrap().is_some());
     assert_eq!(parser.state(), State::Login);
     assert!(meta.stream_data.is_empty());
 }
@@ -384,7 +384,7 @@ fn spoofed_chat_message_survives_a_full_parse_round_trip() {
 
     // Skip the handshake: jump straight to Play by parsing a handshake first.
     c2s.stream_data.update(&frame(&handshake_body(2))).unwrap();
-    parser.try_parse(Side::C2S, &mut c2s).unwrap();
+    parser.try_parse(Side::C2S, &mut c2s, &None).unwrap();
     c2s.stream_data.clear();
     assert_eq!(parser.state(), State::Login);
 
@@ -394,14 +394,14 @@ fn spoofed_chat_message_survives_a_full_parse_round_trip() {
     login_success.extend_from_slice(&[0]); // empty name
     login_success.extend_from_slice(&[0]); // no properties
     s2c.stream_data.update(&frame(&login_success)).unwrap();
-    parser.try_parse(Side::S2C, &mut s2c).unwrap();
+    parser.try_parse(Side::S2C, &mut s2c, &None).unwrap();
     s2c.stream_data.clear();
     assert_eq!(parser.state(), State::Play);
 
     c2s.stream_data.update(&framed).unwrap();
     {
         let parsed = parser
-            .try_parse(Side::C2S, &mut c2s)
+            .try_parse(Side::C2S, &mut c2s, &None)
             .unwrap()
             .expect("packet");
         match parsed {
