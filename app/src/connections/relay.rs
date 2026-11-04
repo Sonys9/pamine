@@ -46,9 +46,14 @@ pub async fn connection_side(
                     &mut stream,
                     &buffer
                 ).await?,
-            packet = channel.rx.recv(), if !channel.rx.is_closed() => {
-                if let Some(packet) = parse_packet(&parser, side, &[], &mut meta, &packet)? {
-                    stream.tx.write_all(&packet).await?;
+            unsure_packet = channel.rx.recv() => {
+                let mut packet = match unsure_packet {
+                    None => eyre::bail!("The channel is closed!"),
+                    Some(packet) => packet
+                };
+                while let Some((parsed_packet, parsed_len)) = parse_packet(&parser, side, &[], &mut meta, Some(&packet))? {
+                    stream.tx.write_all(&parsed_packet).await?;
+                    packet.drain(0..parsed_len);
                 }
             }
         };
@@ -86,7 +91,7 @@ async fn on_real_packet(
     // A parse error is fatal: the stream is desynchronised and there is no
     // way to find the next packet boundary, so the connection is torn down
     // instead of spinning on the same bytes forever.
-    while let Some(packet) = parse_packet(parser, side, &buffer[..len], meta, &None)? {
+    while let Some((packet, _parsed_len)) = parse_packet(parser, side, &buffer[..len], meta, None)? {
         stream.tx.write_all(&packet).await?;
         meta.stream_data.clear();
     }
@@ -123,23 +128,24 @@ fn parse_packet<'a>(
     side: Side,
     buffer: &[u8], // used only for error logging
     meta: &'a mut Meta,
-    custom: &'a Option<Vec<u8>>,
-) -> eyre::Result<Option<Cow<'a, [u8]>>> {
+    custom: Option<&'a Vec<u8>>,
+) -> eyre::Result<Option<(Cow<'a, [u8]>, usize)>> {
     // Read the threshold before `try_parse` borrows the parser: a hand-built
     // frame has to carry the same `data_len` header the peer expects.
     let threshold = parser.threshold();
     let cursor_before = meta.stream_data.diff;
 
-    match parser.try_parse(side, meta, custom) {
+    let len = match parser.try_parse(side, meta, custom) {
         // `None` means the buffer holds only a partial packet;
         // wait for the next read instead of logging an error.
-        Ok(None) => return Ok(None),
-        Ok(Some(packet)) => {
+        (Ok(None), None) => return Ok(None),
+        (Ok(Some(packet)), Some(len)) => {
             if let Some(framed) = on_packet(&packet, threshold) {
-                return Ok(Some(Cow::Owned(framed)));
+                return Ok(Some((Cow::Owned(framed), len)));
             };
+            len
         }
-        Err(e) => {
+        (Err(e), len) => {
             let mut buffer = &buffer[..buffer.len().min(50)];
             if let Some(custom) = custom {
                 buffer = &custom;
@@ -154,15 +160,21 @@ fn parse_packet<'a>(
             // boundary is known: forward the packet as-is and keep going.
             // Only a frame-level failure leaves the cursor in place, and that
             // one is unrecoverable.
-            if meta.stream_data.diff == cursor_before {
+            if meta.stream_data.diff == cursor_before && custom.is_none() {
                 return Err(e);
+            };
+
+            match len {
+                Some(len) => len,
+                None => return Err(e)
             }
-        }
+        },
+        _ => unreachable!()
     };
 
     // Nothing was rewritten: forward the original bytes untouched.
-    Ok(Some(Cow::Borrowed(match custom {
+    Ok(Some((Cow::Borrowed(match custom {
         None => meta.stream_data.packet_bytes(),
-        Some(bytes) => bytes,
-    })))
+        Some(bytes) => &bytes[..len],
+    }), len)))
 }

@@ -9,7 +9,7 @@ use crate::packets::{c2s::packets::C2SPacket, s2c::packets::S2CPacket};
 /// `Ok(None)` means the buffer does not yet hold a complete packet — the caller
 /// should read more bytes and retry. This is distinct from `Err`, which means
 /// the stream is malformed.
-pub type ParseResult<'a> = eyre::Result<Option<Packet<'a>>>;
+pub type ParseResult<'a> = (eyre::Result<Option<Packet<'a>>>, Option<usize>);
 
 /// Which side of the connection a packet belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

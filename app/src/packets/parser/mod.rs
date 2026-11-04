@@ -76,7 +76,7 @@ impl Parser {
         &'a self,
         side: Side,
         meta: &'a mut Meta,
-        custom: &'a Option<Vec<u8>>,
+        custom: Option<&'a Vec<u8>>,
     ) -> ParseResult<'a> {
         // Borrow the three fields we need separately: the receive buffer
         // (shared), the scratch buffer (mutable) and the state machine
@@ -92,8 +92,11 @@ impl Parser {
             Some(bytes) => bytes,
         };
 
-        let Some(frame) = Frame::split(pending, &self.threshold)? else {
-            return Ok(None);
+        let Some(frame) = (match Frame::split(pending, &self.threshold) {
+            Ok(frame) => frame,
+            Err(e) => return (Err(e.into()), None)
+        }) else {
+            return (Ok(None), None);
         };
         let consumed = frame.consumed;
 
@@ -103,14 +106,20 @@ impl Parser {
             // `data_len` was already bounded by `Frame::split`, so this cannot
             // reserve more than `MAX_PACKET_LEN` up front.
             scratch.reserve(frame.data_len);
-            let written = inflate(frame.body, scratch, frame.data_len)?;
+            let written = match inflate(frame.body, scratch, frame.data_len) {
+                Ok(len) => len,
+                Err(e) => return (Err(e), Some(consumed)),
+            };
             &scratch[..written]
         } else {
             frame.body
         };
 
         let mut decoder = Decoder::new(body);
-        let opcode = decoder.varint()?.get();
+        let opcode = match decoder.varint() {
+            Ok(opcode) => opcode,
+            Err(e) => return (Err(e.into()), Some(consumed))
+        }.get();
 
         // Only if it's a real packet
         if custom.is_none() {
@@ -141,10 +150,10 @@ impl Parser {
                     body_len = body.len(),
                     "failed to decode packet body: {e}"
                 );
-                return Err(e);
+                return (Err(e), Some(consumed));
             }
         };
-        Ok(Some(packet))
+        (Ok(Some(packet)), Some(consumed))
     }
 
     /// The compression threshold currently in effect.
