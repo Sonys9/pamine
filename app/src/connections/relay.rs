@@ -140,11 +140,15 @@ fn parse_packet<'a>(
             };
         }
         Err(e) => {
+            let mut buffer = &buffer[..buffer.len().min(50)];
+            if let Some(custom) = custom {
+                buffer = &custom;
+            };
             error!(
                 "[{:?}] parse error: {} got buffer: {:?} (could be not full, that's end part, max 50 bytes)",
                 side,
                 e,
-                &buffer[..buffer.len().min(50)]
+                buffer
             );
             // The frame was validated and the cursor moved, so the packet
             // boundary is known: forward the packet as-is and keep going.
