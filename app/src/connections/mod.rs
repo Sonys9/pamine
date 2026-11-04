@@ -19,10 +19,19 @@ mod testing_will_be_removed;
 
 use std::{net::SocketAddr, sync::Arc};
 
-use tokio::net::TcpStream;
+use tokio::{
+    net::{
+        TcpStream,
+        tcp::{OwnedReadHalf, OwnedWriteHalf},
+    },
+    sync::oneshot::{self, Receiver, Sender},
+};
 use tracing::info;
 
-use crate::{connections::meta::Meta, packets::Parser};
+use crate::{
+    connections::meta::Meta,
+    packets::{Packet, Parser},
+};
 
 use socket::{get_stream, stream_to_target_addr};
 
@@ -45,16 +54,56 @@ impl Connector {
         info!("{:?} -> {:?}", addr, target.as_socket());
 
         let target_stream = get_stream(&target, self.magic_number).await?;
+
+        // For the main stream
         let (stream_reader, stream_writer) = stream.into_split();
         let (target_stream_reader, target_stream_writer) = target_stream.into_split();
+
+        // For sending custom packets
+        let (source_tx, source_rx) = oneshot::channel::<Packet>();
+        let (target_tx, target_rx) = oneshot::channel::<Packet>();
 
         // One parser is shared by both directions: the state machine and the
         // compression threshold are per-connection, not per-direction.
         let parser = Arc::new(Parser::new());
         tokio::select! {
             // Clone doesn't cost anything atp because it's an Arc
-            res = relay::connection_side(stream_reader, target_stream_writer, self.local_addr, parser.clone(), Meta::new()) => res,
-            res = relay::connection_side(target_stream_reader, stream_writer, self.local_addr, parser, Meta::new()) => res,
+            res = relay::connection_side(
+                Stream::new(stream_reader, target_stream_writer), 
+                self.local_addr, 
+                parser.clone(), 
+                Meta::new(), 
+                Shot::new(source_rx, target_tx)
+            ) => res,
+            res = relay::connection_side(
+                Stream::new(target_stream_reader, stream_writer), 
+                self.local_addr, 
+                parser, 
+                Meta::new(), 
+                Shot::new(target_rx, source_tx)
+            ) => res,
         }
+    }
+}
+
+pub struct Shot<'a> {
+    pub rx: Receiver<Packet<'a>>,
+    pub tx: Sender<Packet<'a>>,
+}
+
+impl<'a> Shot<'a> {
+    fn new(rx: Receiver<Packet<'a>>, tx: Sender<Packet<'a>>) -> Self {
+        Self { rx, tx }
+    }
+}
+
+pub struct Stream {
+    pub rx: OwnedReadHalf,
+    pub tx: OwnedWriteHalf,
+}
+
+impl Stream {
+    fn new(rx: OwnedReadHalf, tx: OwnedWriteHalf) -> Self {
+        Self { rx, tx }
     }
 }

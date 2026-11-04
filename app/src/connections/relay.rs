@@ -9,8 +9,7 @@ use tokio::{
 use tracing::error;
 
 use crate::{
-    connections::meta::Meta,
-    packets::{Parser, Side},
+    connections::{Shot, Stream, meta::Meta}, packets::{Packet, Parser, Side},
 };
 
 use super::testing_will_be_removed::on_packet;
@@ -22,14 +21,14 @@ use super::testing_will_be_removed::on_packet;
 /// gets decided from the local address: the listener binds `local_addr`, so a
 /// socket whose peer is `local_addr` is the client->server direction.
 pub async fn connection_side(
-    mut stream: OwnedReadHalf,
-    mut target_stream: OwnedWriteHalf,
+    mut stream: Stream,
     local_addr: SocketAddr,
     parser: Arc<Parser>,
     mut meta: Meta,
+    mut shot: Shot<'_>
 ) -> eyre::Result<()> {
-    let target_addr = target_stream.local_addr()?;
-    let client_addr = stream.local_addr()?;
+    let target_addr = stream.tx.local_addr()?;
+    let client_addr = stream.rx.local_addr()?;
     let side = if target_addr == local_addr {
         Side::S2C
     } else {
@@ -38,9 +37,9 @@ pub async fn connection_side(
 
     let mut buffer = [0u8; 1024 * 4];
     loop {
-        let len = stream.read(&mut buffer).await?;
+        let len = stream.rx.read(&mut buffer).await?;
         if len == 0 {
-            target_stream.shutdown().await?;
+            stream.tx.shutdown().await?;
             eyre::bail!(
                 "[{:?} -> {:?}] The stream is ended",
                 client_addr,
@@ -55,7 +54,7 @@ pub async fn connection_side(
         // way to find the next packet boundary, so the connection is torn down
         // instead of spinning on the same bytes forever.
         while let Some(packet) = parse_packet(&parser, side, &buffer[..len], &mut meta)? {
-            target_stream.write_all(&packet).await?;
+            stream.tx.write_all(&packet).await?;
             meta.stream_data.clear();
         }
     }
