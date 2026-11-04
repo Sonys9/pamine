@@ -94,7 +94,7 @@ impl Parser {
 
         let Some(frame) = (match Frame::split(pending, &self.threshold) {
             Ok(frame) => frame,
-            Err(e) => return (Err(e.into()), None)
+            Err(e) => return (Err(e.into()), None),
         }) else {
             return (Ok(None), None);
         };
@@ -118,8 +118,9 @@ impl Parser {
         let mut decoder = Decoder::new(body);
         let opcode = match decoder.varint() {
             Ok(opcode) => opcode,
-            Err(e) => return (Err(e.into()), Some(consumed))
-        }.get();
+            Err(e) => return (Err(e.into()), Some(consumed)),
+        }
+        .get();
 
         // Only if it's a real packet
         if custom.is_none() {
