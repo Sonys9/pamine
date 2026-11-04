@@ -25,7 +25,7 @@ mod threshold;
 mod tests;
 
 pub use frame::frame_packet;
-pub use state::{ParseResult, Side};
+pub use state::{Parsed, Side};
 pub use stream::StreamData;
 
 // `Packet` is part of the public API surface of `ParseResult`, but nothing in
@@ -68,35 +68,26 @@ impl Parser {
         }
     }
 
-    /// Parses at most one packet from the front of the buffer.
+    /// Parses at most one packet from the front of the receive buffer.
     ///
     /// On success the read cursor advances by exactly one packet, so calling
     /// this in a loop drains every complete packet in the buffer.
-    pub fn try_parse<'a>(
-        &'a self,
-        side: Side,
-        meta: &'a mut Meta,
-        custom: Option<&'a Vec<u8>>,
-    ) -> ParseResult<'a> {
-        // Borrow the three fields we need separately: the receive buffer
-        // (shared), the scratch buffer (mutable) and the state machine
-        // (mutable). Going through a `&mut self` helper would borrow all of
-        // `self` at once and the borrow checker would reject the split.
+    ///
+    /// # Errors
+    ///
+    /// Only *framing* errors are returned as `Err`: the next packet boundary
+    /// cannot be found, so the stream is unrecoverable. A body that fails to
+    /// decode comes back as [`Parsed::BodyError`] with the frame size, so the
+    /// caller can skip it and keep going.
+    pub fn try_parse<'a>(&'a self, side: Side, meta: &'a mut Meta) -> eyre::Result<Parsed<'a>> {
         // Touch the fields directly rather than through `StreamData::pending`:
         // a method call would borrow the whole struct, and we need `buffer`
         // (shared, for `'a`) and `diff` (mutable) at the same time.
-        let pending = match custom {
-            None => {
-                &meta.stream_data.buffer.buffer[meta.stream_data.diff..meta.stream_data.buffer.len]
-            }
-            Some(bytes) => bytes,
-        };
+        let pending =
+            &meta.stream_data.buffer.buffer[meta.stream_data.diff..meta.stream_data.buffer.len];
 
-        let Some(frame) = (match Frame::split(pending, &self.threshold) {
-            Ok(frame) => frame,
-            Err(e) => return (Err(e.into()), None),
-        }) else {
-            return (Ok(None), None);
+        let Some(frame) = Frame::split(pending, &self.threshold)? else {
+            return Ok(Parsed::Incomplete);
         };
         let consumed = frame.consumed;
 
@@ -106,28 +97,66 @@ impl Parser {
             // `data_len` was already bounded by `Frame::split`, so this cannot
             // reserve more than `MAX_PACKET_LEN` up front.
             scratch.reserve(frame.data_len);
-            let written = match inflate(frame.body, scratch, frame.data_len) {
-                Ok(len) => len,
-                Err(e) => return (Err(e), Some(consumed)),
-            };
+            let written = inflate(frame.body, scratch, frame.data_len)?;
             &scratch[..written]
         } else {
             frame.body
         };
 
+        // Advance only after the frame was fully validated. Assign the field
+        // directly: `stream.advance(..)` would re-borrow the whole struct while
+        // `pending` still holds a shared borrow of `stream.buffer`.
+        meta.stream_data.diff += consumed;
+
+        Ok(self.decode_body(side, body, consumed))
+    }
+
+    /// Parses one injected frame.
+    ///
+    /// The frame comes from outside the connection, so it must not touch the
+    /// receive buffer or its cursor. `scratch` is the caller's decompression
+    /// buffer, used only when the frame is compressed.
+    ///
+    /// # Errors
+    ///
+    /// A framing error is returned as `Err`, same as [`Self::try_parse`]. An
+    /// injected frame that does not form a complete packet is
+    /// [`Parsed::Incomplete`], which the caller should treat as a bug in the
+    /// injector rather than as "read more bytes".
+    pub fn parse_injected<'a>(
+        &'a self,
+        side: Side,
+        frame: &'a [u8],
+        scratch: &'a mut Vec<u8>,
+    ) -> eyre::Result<Parsed<'a>> {
+        let Some(frame) = Frame::split(frame, &self.threshold)? else {
+            return Ok(Parsed::Incomplete);
+        };
+        let consumed = frame.consumed;
+
+        let body: &'a [u8] = if frame.compressed {
+            scratch.clear();
+            scratch.reserve(frame.data_len);
+            let written = inflate(frame.body, scratch, frame.data_len)?;
+            &scratch[..written]
+        } else {
+            frame.body
+        };
+
+        Ok(self.decode_body(side, body, consumed))
+    }
+
+    /// Shared tail of both parse paths: opcode, dispatch, error mapping.
+    fn decode_body<'a>(&'a self, side: Side, body: &'a [u8], consumed: usize) -> Parsed<'a> {
         let mut decoder = Decoder::new(body);
         let opcode = match decoder.varint() {
-            Ok(opcode) => opcode,
-            Err(e) => return (Err(e.into()), Some(consumed)),
-        }
-        .get();
-
-        // Only if it's a real packet
-        if custom.is_none() {
-            // Advance only after the frame was fully validated. Assign the field
-            // directly: `stream.advance(..)` would re-borrow the whole struct while
-            // `pending` still holds a shared borrow of `stream.buffer`.
-            meta.stream_data.diff += consumed;
+            Ok(opcode) => opcode.get(),
+            Err(error) => {
+                return Parsed::BodyError {
+                    error: error.into(),
+                    consumed,
+                };
+            }
         };
 
         let state = self.state.get();
@@ -138,23 +167,22 @@ impl Parser {
             State::Play => dispatch::play(opcode, decoder, side),
         };
 
-        // A body that fails to decode is not fatal: the frame boundary is
-        // already known, so the relay forwards the packet untouched. Log the
-        // opcode so a mis-modelled packet can be identified from the log alone.
-        let packet = match packet {
-            Ok(packet) => packet,
-            Err(e) => {
+        match packet {
+            Ok(packet) => Parsed::Packet { packet, consumed },
+            Err(error) => {
+                // A body that fails to decode is not fatal: the frame boundary
+                // is known, so the caller can skip it. Log the opcode so a
+                // mis-modelled packet can be identified from the log alone.
                 error!(
                     side = ?side,
                     state = ?state,
                     opcode = format_args!("0x{opcode:02X}"),
                     body_len = body.len(),
-                    "failed to decode packet body: {e}"
+                    "failed to decode packet body: {error}"
                 );
-                return (Err(e), Some(consumed));
+                Parsed::BodyError { error, consumed }
             }
-        };
-        (Ok(Some(packet)), Some(consumed))
+        }
     }
 
     /// The compression threshold currently in effect.

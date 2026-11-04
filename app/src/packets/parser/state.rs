@@ -4,12 +4,42 @@ use std::sync::atomic::{AtomicU8, Ordering};
 
 use crate::packets::{c2s::packets::C2SPacket, s2c::packets::S2CPacket};
 
-/// Result of a single parse attempt.
+/// Outcome of a single parse attempt.
 ///
-/// `Ok(None)` means the buffer does not yet hold a complete packet — the caller
-/// should read more bytes and retry. This is distinct from `Err`, which means
-/// the stream is malformed.
-pub type ParseResult<'a> = (eyre::Result<Option<Packet<'a>>>, Option<usize>);
+/// A *framing* error is returned as `Err` by the parser: the next packet
+/// boundary cannot be found, so the stream is unrecoverable. Everything else is
+/// one of these three cases.
+#[derive(Debug)]
+pub enum Parsed<'a> {
+    /// The input does not hold a complete frame yet. Read more and retry.
+    Incomplete,
+    /// A frame was decoded successfully.
+    Packet {
+        packet: Packet<'a>,
+        /// How many bytes of the input this frame occupied.
+        consumed: usize,
+    },
+    /// The frame was valid but its body failed to decode.
+    ///
+    /// `consumed` is still known, so the caller can skip the frame and keep the
+    /// stream in sync instead of tearing the connection down. This matters
+    /// because the decoder is not complete: an unknown or mis-modelled packet
+    /// must not kill a working connection.
+    BodyError {
+        error: eyre::Report,
+        consumed: usize,
+    },
+}
+
+impl Parsed<'_> {
+    /// How many bytes of the input this attempt consumed, if a frame was found.
+    pub fn consumed(&self) -> Option<usize> {
+        match self {
+            Self::Incomplete => None,
+            Self::Packet { consumed, .. } | Self::BodyError { consumed, .. } => Some(*consumed),
+        }
+    }
+}
 
 /// Which side of the connection a packet belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

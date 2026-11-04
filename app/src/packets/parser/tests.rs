@@ -3,7 +3,7 @@
 use pcore::{Decode, encode, encoder::varint};
 
 use super::{
-    Parser, Side, State, UnsureThreshold,
+    Parsed, Parser, Side, State, UnsureThreshold,
     frame::{Frame, MAX_PACKET_LEN, deflate, inflate},
     frame_packet,
 };
@@ -48,13 +48,10 @@ fn parses_single_packet() {
     let mut meta = Meta::new();
     meta.stream_data.update(&frame(&handshake_body(2))).unwrap();
 
-    assert!(
-        parser
-            .try_parse(Side::C2S, &mut meta, None)
-            .0
-            .unwrap()
-            .is_some()
-    );
+    assert!(matches!(
+        parser.try_parse(Side::C2S, &mut meta),
+        Ok(Parsed::Packet { .. })
+    ));
     assert_eq!(parser.state(), State::Login);
     assert!(meta.stream_data.is_empty());
 }
@@ -66,13 +63,10 @@ fn parses_two_packets_from_one_read() {
     // Handshake with next_state=1 moves us to Status, where the state does
     // not change again, so both following packets parse the same way.
     meta.stream_data.update(&frame(&handshake_body(1))).unwrap();
-    assert!(
-        parser
-            .try_parse(Side::C2S, &mut meta, None)
-            .0
-            .unwrap()
-            .is_some()
-    );
+    assert!(matches!(
+        parser.try_parse(Side::C2S, &mut meta),
+        Ok(Parsed::Packet { .. })
+    ));
     meta.stream_data.clear();
     assert_eq!(parser.state(), State::Status);
 
@@ -81,21 +75,15 @@ fn parses_two_packets_from_one_read() {
     bytes.extend_from_slice(&frame(&[0x00]));
     meta.stream_data.update(&bytes).unwrap();
 
-    assert!(
-        parser
-            .try_parse(Side::C2S, &mut meta, None)
-            .0
-            .unwrap()
-            .is_some()
-    );
+    assert!(matches!(
+        parser.try_parse(Side::C2S, &mut meta),
+        Ok(Parsed::Packet { .. })
+    ));
     meta.stream_data.clear();
-    assert!(
-        parser
-            .try_parse(Side::C2S, &mut meta, None)
-            .0
-            .unwrap()
-            .is_some()
-    );
+    assert!(matches!(
+        parser.try_parse(Side::C2S, &mut meta),
+        Ok(Parsed::Packet { .. })
+    ));
     meta.stream_data.clear();
     assert!(meta.stream_data.is_empty());
 }
@@ -107,13 +95,10 @@ fn incomplete_packet_returns_none() {
     let full = frame(&handshake_body(2));
     meta.stream_data.update(&full[..full.len() - 1]).unwrap();
 
-    assert!(
-        parser
-            .try_parse(Side::C2S, &mut meta, None)
-            .0
-            .unwrap()
-            .is_none()
-    );
+    assert!(matches!(
+        parser.try_parse(Side::C2S, &mut meta),
+        Ok(Parsed::Incomplete)
+    ));
     // Nothing was consumed, so the bytes are still there.
     assert!(!meta.stream_data.is_empty());
 }
@@ -122,13 +107,10 @@ fn incomplete_packet_returns_none() {
 fn empty_buffer_returns_none() {
     let parser = Parser::new();
     let mut meta = Meta::new();
-    assert!(
-        parser
-            .try_parse(Side::C2S, &mut meta, None)
-            .0
-            .unwrap()
-            .is_none()
-    );
+    assert!(matches!(
+        parser.try_parse(Side::C2S, &mut meta),
+        Ok(Parsed::Incomplete)
+    ));
 }
 
 #[test]
@@ -139,22 +121,16 @@ fn fragmented_packet_completes_after_second_read() {
     let (a, b) = full.split_at(5);
 
     meta.stream_data.update(a).unwrap();
-    assert!(
-        parser
-            .try_parse(Side::C2S, &mut meta, None)
-            .0
-            .unwrap()
-            .is_none()
-    );
+    assert!(matches!(
+        parser.try_parse(Side::C2S, &mut meta),
+        Ok(Parsed::Incomplete)
+    ));
 
     meta.stream_data.update(b).unwrap();
-    assert!(
-        parser
-            .try_parse(Side::C2S, &mut meta, None)
-            .0
-            .unwrap()
-            .is_some()
-    );
+    assert!(matches!(
+        parser.try_parse(Side::C2S, &mut meta),
+        Ok(Parsed::Packet { .. })
+    ));
 }
 
 #[test]
@@ -162,7 +138,7 @@ fn negative_length_is_an_error() {
     let parser = Parser::new();
     let mut meta = Meta::new();
     meta.stream_data.update(&varint(-1)).unwrap();
-    assert!(parser.try_parse(Side::C2S, &mut meta, None).0.is_err());
+    assert!(parser.try_parse(Side::C2S, &mut meta).is_err());
 }
 
 #[test]
@@ -170,7 +146,7 @@ fn reset_restores_initial_state() {
     let parser = Parser::new();
     let mut meta = Meta::new();
     meta.stream_data.update(&frame(&handshake_body(2))).unwrap();
-    parser.try_parse(Side::C2S, &mut meta, None).0.unwrap();
+    parser.try_parse(Side::C2S, &mut meta).unwrap();
     assert_eq!(parser.state(), State::Login);
 
     parser.reset(&mut meta);
@@ -186,13 +162,10 @@ fn sides_are_independent() {
     c2s.stream_data.update(&frame(&handshake_body(2))).unwrap();
 
     // Bytes on C2S must not be visible on S2C.
-    assert!(
-        parser
-            .try_parse(Side::S2C, &mut s2c, None)
-            .0
-            .unwrap()
-            .is_none()
-    );
+    assert!(matches!(
+        parser.try_parse(Side::S2C, &mut s2c),
+        Ok(Parsed::Incomplete)
+    ));
     assert!(!c2s.stream_data.is_empty());
 }
 
@@ -349,15 +322,85 @@ fn frame_packet_round_trips_through_the_parser() {
     let framed = frame_packet(&body, &uncompressed()).unwrap();
     meta.stream_data.update(&framed).unwrap();
 
-    assert!(
-        parser
-            .try_parse(Side::C2S, &mut meta, None)
-            .0
-            .unwrap()
-            .is_some()
-    );
+    assert!(matches!(
+        parser.try_parse(Side::C2S, &mut meta),
+        Ok(Parsed::Packet { .. })
+    ));
     assert_eq!(parser.state(), State::Login);
     assert!(meta.stream_data.is_empty());
+}
+
+#[test]
+fn injected_frame_parses_without_touching_the_receive_buffer() {
+    let parser = Parser::new();
+    let mut meta = Meta::new();
+    let mut scratch = Vec::new();
+
+    // Real traffic already sits in the buffer; the injection must not disturb it.
+    let real = frame(&handshake_body(2));
+    meta.stream_data.update(&real).unwrap();
+
+    let injected = frame_packet(&handshake_body(2), &uncompressed()).unwrap();
+    let parsed = parser
+        .parse_injected(Side::C2S, &injected, &mut scratch)
+        .unwrap();
+
+    assert!(matches!(parsed, Parsed::Packet { .. }));
+    assert_eq!(parsed.consumed(), Some(injected.len()));
+    // The receive buffer and its cursor are untouched.
+    assert_eq!(meta.stream_data.diff, 0);
+    assert_eq!(meta.stream_data.pending(), &real[..]);
+}
+
+#[test]
+fn injected_frame_advances_the_state_machine() {
+    let parser = Parser::new();
+    let mut meta = Meta::new();
+    let mut scratch = Vec::new();
+
+    let injected = frame_packet(&handshake_body(2), &uncompressed()).unwrap();
+    parser
+        .parse_injected(Side::C2S, &injected, &mut scratch)
+        .unwrap();
+
+    // An injected handshake is still a handshake: the state must move.
+    assert_eq!(parser.state(), State::Login);
+}
+
+#[test]
+fn injected_partial_frame_is_incomplete() {
+    let parser = Parser::new();
+    let mut meta = Meta::new();
+    let mut scratch = Vec::new();
+
+    let injected = frame_packet(&handshake_body(2), &uncompressed()).unwrap();
+    let parsed = parser
+        .parse_injected(Side::C2S, &injected[..injected.len() - 1], &mut scratch)
+        .unwrap();
+
+    assert!(matches!(parsed, Parsed::Incomplete));
+    assert_eq!(parsed.consumed(), None);
+}
+
+#[test]
+fn injected_compressed_frame_is_decompressed() {
+    let parser = Parser::new();
+    let mut meta = Meta::new();
+    let mut scratch = Vec::new();
+
+    // Enable compression on the parser, then build a frame that is large
+    // enough to actually be compressed.
+    parser.threshold().set(1);
+    let body = handshake_body(2);
+    let injected = frame_packet(&body, parser.threshold()).unwrap();
+
+    let parsed = parser
+        .parse_injected(Side::C2S, &injected, &mut scratch)
+        .unwrap();
+
+    assert!(matches!(parsed, Parsed::Packet { .. }));
+    assert_eq!(parsed.consumed(), Some(injected.len()));
+    assert_eq!(parser.state(), State::Login);
 }
 
 /// A `Chat Message` body with no signature and no last-seen entries.
@@ -444,7 +487,7 @@ fn spoofed_chat_message_survives_a_full_parse_round_trip() {
 
     // Skip the handshake: jump straight to Play by parsing a handshake first.
     c2s.stream_data.update(&frame(&handshake_body(2))).unwrap();
-    parser.try_parse(Side::C2S, &mut c2s, None).0.unwrap();
+    parser.try_parse(Side::C2S, &mut c2s).unwrap();
     c2s.stream_data.clear();
     assert_eq!(parser.state(), State::Login);
 
@@ -454,18 +497,17 @@ fn spoofed_chat_message_survives_a_full_parse_round_trip() {
     login_success.extend_from_slice(&[0]); // empty name
     login_success.extend_from_slice(&[0]); // no properties
     s2c.stream_data.update(&frame(&login_success)).unwrap();
-    parser.try_parse(Side::S2C, &mut s2c, None).0.unwrap();
+    parser.try_parse(Side::S2C, &mut s2c).unwrap();
     s2c.stream_data.clear();
     assert_eq!(parser.state(), State::Play);
 
     c2s.stream_data.update(&framed).unwrap();
     {
-        let parsed = parser
-            .try_parse(Side::C2S, &mut c2s, None)
-            .0
-            .unwrap()
-            .expect("packet");
-        match parsed {
+        let parsed = parser.try_parse(Side::C2S, &mut c2s).unwrap();
+        let Parsed::Packet { packet, .. } = parsed else {
+            panic!("expected a packet, got {parsed:?}");
+        };
+        match packet {
             super::Packet::C2S(crate::packets::c2s::packets::C2SPacket::Play(
                 Play::ChatMessage(m),
             )) => {

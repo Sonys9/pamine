@@ -102,6 +102,11 @@ pub struct Injection {
 }
 
 impl Injection {
+    /// Builds an injection from a complete frame.
+    ///
+    /// `bytes` must be what [`frame_packet`](crate::packets::frame_packet)
+    /// returns for the threshold in effect at injection time.
+    #[allow(dead_code)] // public API for injectors; nothing in the crate calls it yet
     pub fn new(bytes: Vec<u8>, changeable: bool) -> Self {
         Self { changeable, bytes }
     }
