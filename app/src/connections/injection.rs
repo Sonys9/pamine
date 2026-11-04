@@ -10,7 +10,7 @@ use crate::packets::{UnsureThreshold, frame_packet};
 /// scripts modify each other's output. Without a cap, a script that rewrites a
 /// packet into another `changeable` packet of the same kind would loop forever:
 /// the relay would keep re-queueing it and never drain the channel.
-pub const MAX_REWRITE_DEPTH: u8 = 8;
+pub const MAX_REWRITE_DEPTH: u8 = 64;
 
 /// A packet queued for injection into one direction of the connection.
 ///
