@@ -169,6 +169,13 @@ fn log_body_error(side: Side, error: &eyre::Report, bytes: &[u8]) {
     );
 }
 
+/// Runs the rewrite hook and applies its result.
+///
+/// The injection is queued with `try_send`, not `send().await`: the channel
+/// belongs to the *other* relay, and blocking here would let a slow peer stall
+/// this direction too. A full queue means the injector is producing faster than
+/// the peer consumes, so the packet is dropped and logged rather than turning
+/// into backpressure on the real stream.
 async fn on_parsed_packet<'a>(
     packet: Packet<'a>,
     parser: &Arc<Parser>,
@@ -176,9 +183,13 @@ async fn on_parsed_packet<'a>(
     packet_bytes: &'a [u8],
 ) -> Cow<'a, [u8]> {
     let update = on_packet(&packet, parser.threshold());
-    if let Some(inject) = update.inject {
-        channel_tx.send(inject).await;
-    };
+
+    if let Some(inject) = update.inject
+        && let Err(e) = channel_tx.try_send(inject)
+    {
+        error!("dropping an injected packet: {e}");
+    }
+
     match update.change_with {
         Some(rewritten) => Cow::Owned(rewritten),
         None => Cow::Borrowed(packet_bytes),

@@ -18,6 +18,8 @@ mod relay;
 mod socket;
 mod testing_will_be_removed;
 
+pub use injection::{Injection, Update};
+
 use std::{net::SocketAddr, sync::Arc};
 
 use tokio::{
@@ -29,10 +31,7 @@ use tokio::{
 };
 use tracing::info;
 
-use crate::{
-    connections::{injection::Injection, meta::Meta},
-    packets::Parser,
-};
+use crate::{connections::meta::Meta, packets::Parser};
 
 use socket::{get_stream, stream_to_target_addr};
 
