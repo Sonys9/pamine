@@ -98,22 +98,17 @@ async fn forward_real(
             return Ok(());
         }
 
-        // `Parsed` carries the frame, so the receive buffer is not borrowed a
-        // second time here. The borrow still has to end before `clear()`, hence
-        // the inner block.
-        {
-            let frame = match parsed {
-                Parsed::Packet { packet, frame, .. } => {
-                    on_parsed_packet(packet, parser, channel_tx, frame).await
-                }
-                Parsed::BodyError { error, frame, .. } => {
-                    log_body_error(side, &error, bytes);
-                    Cow::Borrowed(frame)
-                }
-                Parsed::Incomplete => unreachable!("consumed() returned Some for Incomplete"),
-            };
-            stream.tx.write_all(&frame).await?;
-        }
+        let frame = match parsed {
+            Parsed::Packet { packet, frame, .. } => {
+                on_parsed_packet(packet, parser, channel_tx, frame).await
+            }
+            Parsed::BodyError { error, frame, .. } => {
+                log_body_error(side, &error, bytes);
+                Cow::Borrowed(frame)
+            }
+            Parsed::Incomplete => unreachable!("consumed() returned Some for Incomplete"),
+        };
+        stream.tx.write_all(&frame).await?;
 
         meta.stream_data.clear();
     }
@@ -191,7 +186,7 @@ async fn on_parsed_packet<'a>(
     }
 
     match update.change_with {
-        Some(rewritten) => Cow::Owned(rewritten),
+        Some(rewritten) => Cow::Owned(rewritten.bytes),
         None => Cow::Borrowed(packet_bytes),
     }
 }

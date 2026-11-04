@@ -21,18 +21,10 @@ use pcore::{decoder::VarInt, encode};
 use tracing::{error, info};
 
 use crate::{
-    connections::{Injection, Update},
-    ids,
-    packets::{
-        Packet::{self, C2S},
-        UnsureThreshold,
-        c2s::{
-            self,
-            packets::C2SPacket,
-            play::{ChatCommand, ChatMessage, SetCreativeModeSlot},
-        },
-        frame_packet,
-        s2c::{self, play::SynchronizePlayerPosition},
+    connections::{Injection, Update}, ids, packets::{
+        Packet::{self, C2S, S2C}, UnsureThreshold, c2s::{
+            self, packets::C2SPacket, play::{ChatCommand, ChatMessage, ConfirmTeleportation, SetCreativeModeSlot, SetPlayerPosition},
+        }, frame_packet, s2c::{self, packets::S2CPacket, play::SynchronizePlayerPosition},
     },
 };
 
@@ -41,12 +33,34 @@ use crate::{
 /// Errors are logged and turned into [`Update::none`]: a broken rewrite must not
 /// take the connection down.
 pub fn on_packet(packet: &Packet<'_>, threshold: &UnsureThreshold) -> Update {
+    // ===========
+    match packet {
+        S2C(S2CPacket::Play(s2c::play::Play::ChunkDataAndUpdateLight(_))) => return Update::none(),
+        S2C(S2CPacket::Play(s2c::play::Play::SetEntityMetadata(_))) => return Update::none(),
+        S2C(S2CPacket::Play(s2c::play::Play::SetEntityVelocity(_))) => return Update::none(),
+        S2C(S2CPacket::Play(s2c::play::Play::UpdateLight(_))) => return Update::none(),
+        S2C(S2CPacket::Play(s2c::play::Play::UpdateEntityRotation(_))) => return Update::none(),
+        S2C(S2CPacket::Play(s2c::play::Play::UpdateEntityPosition(_))) => return Update::none(),
+        S2C(S2CPacket::Play(s2c::play::Play::UpdateEntityPositionAndRotation(_))) => return Update::none(),
+        S2C(S2CPacket::Play(s2c::play::Play::SetHeadRotation(_))) => return Update::none(),
+        S2C(S2CPacket::Play(s2c::play::Play::TeleportEntity(_))) => return Update::none(),
+        S2C(S2CPacket::Play(s2c::play::Play::UpdateAttributes(_))) => return Update::none(),
+        S2C(S2CPacket::Play(s2c::play::Play::RemoveEntities(_))) => return Update::none(),
+        S2C(S2CPacket::Play(s2c::play::Play::SpawnEntity(_))) => return Update::none(),
+        
+        _ => {},
+    }
+    info!("{:?}", packet);
+    // ===========
     let result = match packet {
         C2S(C2SPacket::Play(c2s::play::Play::ChatMessage(message))) => {
             on_message(message, threshold)
         }
         C2S(C2SPacket::Play(c2s::play::Play::SetCreativeModeSlot(packet))) => {
             on_creative_slot(packet)
+        }
+        C2S(C2SPacket::Play(c2s::play::Play::ConfirmTeleportation(packet))) => {
+            on_confirm(packet)
         }
         _ => return Update::none(),
     };
@@ -55,6 +69,16 @@ pub fn on_packet(packet: &Packet<'_>, threshold: &UnsureThreshold) -> Update {
         error!("on_packet failed: {e}");
         Update::none()
     })
+}
+
+fn on_confirm(packet: &ConfirmTeleportation) -> eyre::Result<Update> {
+    info!("Confirm teleportation packet: {:?}", packet);
+    info!("Id: {:?}", packet.teleport_id);
+    if packet.teleport_id.get() == 123456 {
+        info!("Id is 123456, aborting the packet");
+        return Ok(Update::new_with_change(Injection::new_unchangeable(None)))
+    };
+    Ok(Update::none())
 }
 
 fn on_creative_slot(packet: &SetCreativeModeSlot) -> eyre::Result<Update> {
@@ -76,7 +100,7 @@ fn on_message(packet: &ChatMessage<'_>, threshold: &UnsureThreshold) -> eyre::Re
 
     match packet.message {
         "info" => spoof_info(packet, threshold),
-        "change my position" => change_pos(threshold),
+        "change my position" => change_pos(packet, threshold),
         _ => Ok(Update::none()),
     }
 }
@@ -87,7 +111,7 @@ fn on_message(packet: &ChatMessage<'_>, threshold: &UnsureThreshold) -> eyre::Re
 /// sees the chat message and hands the injection to the S2C relay, which writes
 /// it to the client. `changeable: false` keeps the injection out of the rewrite
 /// hook, so it cannot feed back into itself.
-fn change_pos(threshold: &UnsureThreshold) -> eyre::Result<Update> {
+fn change_pos(message_packet: &ChatMessage<'_>, threshold: &UnsureThreshold) -> eyre::Result<Update> {
     let position = SynchronizePlayerPosition {
         x: 100.,
         y: 100.,
@@ -98,42 +122,45 @@ fn change_pos(threshold: &UnsureThreshold) -> eyre::Result<Update> {
         teleport_id: VarInt::new(123456),
         dismount_vehicle: true,
     };
-    let body = encode(&s2c::play::Play::SynchronizePlayerPosition(position));
-    let framed = frame_packet(&body, threshold)?;
+    let inject = Injection::new_from_packet_changeable(&s2c::play::Play::SynchronizePlayerPosition(position), threshold)?;
 
-    Ok(Update {
-        change_with: None,
-        inject: Some(Injection::new(framed, false)),
-    })
+    let playerside_position = SetPlayerPosition {
+        x: 100.,
+        feet_y: 100.,
+        z: 100.,
+        on_ground: false,
+    };
+    let mut change_with = Injection::new_from_packet_changeable(&c2s::play::Play::SetPlayerPosition(playerside_position), threshold)?;
+
+    let mut message_packet = message_packet.clone();
+    message_packet.message = "Okay!";
+    change_with.update_from_packet(&c2s::play::Play::ChatMessage(message_packet), threshold)?;
+    
+    Ok(Update::new(change_with, inject))
 }
 
 /// Replaces the message with two spoofed ones plus a command.
 fn spoof_info(packet: &ChatMessage<'_>, threshold: &UnsureThreshold) -> eyre::Result<Update> {
+    let mut change_with = Injection::new_changeable(None);
     let messages = ["This message was just spoofed!", "Using a command '/?'."];
-    let mut result = Vec::new();
     for message in messages {
         let mut packet = packet.clone();
         packet.message = message;
-        let message_packet = encode(&c2s::play::Play::ChatMessage(packet));
-        result.extend_from_slice(&frame_packet(&message_packet, threshold)?);
+        change_with.update_from_packet(&c2s::play::Play::ChatMessage(packet), threshold)?;
     }
 
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_millis() as i64;
-    let command_packet = encode(&c2s::play::Play::ChatCommand(ChatCommand {
+    change_with.update_from_packet(&c2s::play::Play::ChatCommand(ChatCommand {
         command: "?",
         timestamp: now,
         salt: now,
         argument_signatures: Vec::new(),
         signed_preview: false,
         last_seen_messages: &[0, 0],
-    }));
-    result.extend_from_slice(&frame_packet(&command_packet, threshold)?);
+    }), threshold)?;
 
-    Ok(Update {
-        change_with: Some(result),
-        inject: None,
-    })
+    Ok(Update::new_with_change(change_with))
 }
