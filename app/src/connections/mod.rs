@@ -24,14 +24,11 @@ use tokio::{
         TcpStream,
         tcp::{OwnedReadHalf, OwnedWriteHalf},
     },
-    sync::oneshot::{self, Receiver, Sender},
+    sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
 };
 use tracing::info;
 
-use crate::{
-    connections::meta::Meta,
-    packets::{Packet, Parser},
-};
+use crate::{connections::meta::Meta, packets::Parser};
 
 use socket::{get_stream, stream_to_target_addr};
 
@@ -60,8 +57,8 @@ impl Connector {
         let (target_stream_reader, target_stream_writer) = target_stream.into_split();
 
         // For sending custom packets
-        let (source_tx, source_rx) = oneshot::channel::<Packet>();
-        let (target_tx, target_rx) = oneshot::channel::<Packet>();
+        let (source_tx, source_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+        let (target_tx, target_rx) = mpsc::unbounded_channel::<Vec<u8>>();
 
         // One parser is shared by both directions: the state machine and the
         // compression threshold are per-connection, not per-direction.
@@ -69,30 +66,30 @@ impl Connector {
         tokio::select! {
             // Clone doesn't cost anything atp because it's an Arc
             res = relay::connection_side(
-                Stream::new(stream_reader, target_stream_writer), 
-                self.local_addr, 
-                parser.clone(), 
-                Meta::new(), 
-                Shot::new(source_rx, target_tx)
+                Stream::new(stream_reader, target_stream_writer),
+                self.local_addr,
+                parser.clone(),
+                Meta::new(),
+                Channel::new(source_rx, target_tx)
             ) => res,
             res = relay::connection_side(
-                Stream::new(target_stream_reader, stream_writer), 
-                self.local_addr, 
-                parser, 
-                Meta::new(), 
-                Shot::new(target_rx, source_tx)
+                Stream::new(target_stream_reader, stream_writer),
+                self.local_addr,
+                parser,
+                Meta::new(),
+                Channel::new(target_rx, source_tx)
             ) => res,
         }
     }
 }
 
-pub struct Shot<'a> {
-    pub rx: Receiver<Packet<'a>>,
-    pub tx: Sender<Packet<'a>>,
+pub struct Channel {
+    pub rx: UnboundedReceiver<Vec<u8>>,
+    pub tx: UnboundedSender<Vec<u8>>,
 }
 
-impl<'a> Shot<'a> {
-    fn new(rx: Receiver<Packet<'a>>, tx: Sender<Packet<'a>>) -> Self {
+impl Channel {
+    fn new(rx: UnboundedReceiver<Vec<u8>>, tx: UnboundedSender<Vec<u8>>) -> Self {
         Self { rx, tx }
     }
 }

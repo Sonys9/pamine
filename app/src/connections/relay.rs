@@ -2,14 +2,12 @@
 
 use std::{borrow::Cow, net::SocketAddr, sync::Arc};
 
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::tcp::{OwnedReadHalf, OwnedWriteHalf},
-};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tracing::error;
 
 use crate::{
-    connections::{Shot, Stream, meta::Meta}, packets::{Packet, Parser, Side},
+    connections::{Channel, Stream, meta::Meta},
+    packets::{Parser, Side},
 };
 
 use super::testing_will_be_removed::on_packet;
@@ -25,7 +23,7 @@ pub async fn connection_side(
     local_addr: SocketAddr,
     parser: Arc<Parser>,
     mut meta: Meta,
-    mut shot: Shot<'_>
+    mut channel: Channel,
 ) -> eyre::Result<()> {
     let target_addr = stream.tx.local_addr()?;
     let client_addr = stream.rx.local_addr()?;
@@ -37,27 +35,62 @@ pub async fn connection_side(
 
     let mut buffer = [0u8; 1024 * 4];
     loop {
-        let len = stream.rx.read(&mut buffer).await?;
-        if len == 0 {
-            stream.tx.shutdown().await?;
-            eyre::bail!(
-                "[{:?} -> {:?}] The stream is ended",
-                client_addr,
-                target_addr,
-            );
+        tokio::select! {
+            result = stream.rx.read(&mut buffer) =>
+                on_real_packet(
+                    &parser,
+                    side,
+                    (client_addr, target_addr),
+                    result,
+                    &mut meta,
+                    &mut stream,
+                    &buffer
+                ).await?,
+            packet = channel.rx.recv() => {
+                while let Some(packet) = parse_packet(&parser, side, &[], &mut meta, &packet)? {
+                    stream.tx.write_all(&packet).await?;
+                }
+            }
         };
 
-        meta.stream_data.update(&buffer[..len])?;
-        // One read can carry several packets, so drain the buffer completely.
-        //
-        // A parse error is fatal: the stream is desynchronised and there is no
-        // way to find the next packet boundary, so the connection is torn down
-        // instead of spinning on the same bytes forever.
-        while let Some(packet) = parse_packet(&parser, side, &buffer[..len], &mut meta)? {
-            stream.tx.write_all(&packet).await?;
-            meta.stream_data.clear();
-        }
+        /*
+        while let Some(packet) = parse_packet(&parser, side, &buffer[..len], &mut meta, )? {
+
+        }*/
     }
+}
+
+#[inline(always)]
+async fn on_real_packet(
+    parser: &Arc<Parser>,
+    side: Side,
+    (client_addr, target_addr): (SocketAddr, SocketAddr),
+    result: Result<usize, std::io::Error>,
+    meta: &mut Meta,
+    stream: &mut Stream,
+    buffer: &[u8],
+) -> eyre::Result<()> {
+    let len = result?;
+    if len == 0 {
+        stream.tx.shutdown().await?;
+        eyre::bail!(
+            "[{:?} -> {:?}] The stream is ended",
+            client_addr,
+            target_addr,
+        );
+    };
+
+    meta.stream_data.update(&buffer[..len])?;
+    // One read can carry several packets, so drain the buffer completely.
+    //
+    // A parse error is fatal: the stream is desynchronised and there is no
+    // way to find the next packet boundary, so the connection is torn down
+    // instead of spinning on the same bytes forever.
+    while let Some(packet) = parse_packet(parser, side, &buffer[..len], meta, &None)? {
+        stream.tx.write_all(&packet).await?;
+        meta.stream_data.clear();
+    }
+    Ok(())
 }
 
 /// Parses at most one packet and returns the bytes to forward.
@@ -84,18 +117,20 @@ pub async fn connection_side(
 /// body. So a cursor that moved means the boundary is known and the error came
 /// from the body; a cursor that did not move means the frame itself is broken
 /// and the next boundary cannot be found.
+#[inline(always)]
 fn parse_packet<'a>(
     parser: &'a Arc<Parser>,
     side: Side,
-    buffer: &[u8],
+    buffer: &[u8], // used only for error logging
     meta: &'a mut Meta,
+    custom: &Option<Vec<u8>>,
 ) -> eyre::Result<Option<Cow<'a, [u8]>>> {
     // Read the threshold before `try_parse` borrows the parser: a hand-built
     // frame has to carry the same `data_len` header the peer expects.
     let threshold = parser.threshold();
     let cursor_before = meta.stream_data.diff;
 
-    match parser.try_parse(side, meta) {
+    match parser.try_parse(side, meta, custom) {
         // `None` means the buffer holds only a partial packet;
         // wait for the next read instead of logging an error.
         Ok(None) => return Ok(None),

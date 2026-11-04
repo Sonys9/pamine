@@ -72,9 +72,12 @@ impl Parser {
     ///
     /// On success the read cursor advances by exactly one packet, so calling
     /// this in a loop drains every complete packet in the buffer.
-    pub fn try_parse<'a>(&'a self, side: Side, meta: &'a mut Meta) -> ParseResult<'a> {
-        let threshold = &self.threshold;
-
+    pub fn try_parse<'a>(
+        &'a self,
+        side: Side,
+        meta: &'a mut Meta,
+        custom: &'a Option<Vec<u8>>,
+    ) -> ParseResult<'a> {
         // Borrow the three fields we need separately: the receive buffer
         // (shared), the scratch buffer (mutable) and the state machine
         // (mutable). Going through a `&mut self` helper would borrow all of
@@ -82,10 +85,14 @@ impl Parser {
         // Touch the fields directly rather than through `StreamData::pending`:
         // a method call would borrow the whole struct, and we need `buffer`
         // (shared, for `'a`) and `diff` (mutable) at the same time.
-        let pending: &'a [u8] =
-            &meta.stream_data.buffer.buffer[meta.stream_data.diff..meta.stream_data.buffer.len];
+        let pending = match custom {
+            None => {
+                &meta.stream_data.buffer.buffer[meta.stream_data.diff..meta.stream_data.buffer.len]
+            }
+            Some(bytes) => bytes,
+        };
 
-        let Some(frame) = Frame::split(pending, threshold)? else {
+        let Some(frame) = Frame::split(pending, &self.threshold)? else {
             return Ok(None);
         };
         let consumed = frame.consumed;
