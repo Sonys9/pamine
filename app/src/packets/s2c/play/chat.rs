@@ -14,7 +14,9 @@ use crate::packets::{counted, optional_bytes, optional_chat};
 /// `Component is Present` is the gate for the message, so the message is read
 /// by hand instead of through `Option<&str>` (which would consume a second
 /// boolean).
-#[derive(Debug, Clone)]
+use pcore_gen::Lua;
+
+#[derive(Lua, Debug, Clone)]
 pub struct ChatPreview<'a> {
     pub query_id: i32,
     pub has_component: bool,
@@ -48,18 +50,18 @@ impl Encode for ChatPreview<'_> {
     }
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct HideMessage<'a> {
     pub signature: &'a [u8],
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct Disconnect<'a> {
     pub reason: &'a str,
 }
 
 /// `Message Header` (0x32).
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct MessageHeader<'a> {
     pub has_preceding_signature: bool,
     pub preceding_signature: Option<&'a [u8]>,
@@ -94,7 +96,7 @@ impl Encode for MessageHeader<'_> {
 }
 
 /// A previously sent message, referenced by its sender and signature.
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct PreviousMessage<'a> {
     pub sender: Uuid,
     pub signature: &'a [u8],
@@ -131,7 +133,7 @@ impl Encode for PreviousMessage<'_> {
 /// network target name present: bool
 ///   network target name: Chat
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct PlayerChatMessage<'a> {
     pub signature: Option<&'a [u8]>,
     pub sender: Uuid,
@@ -258,19 +260,19 @@ fn write_bitset(encoder: &mut Encoder, words: &[u8]) {
     encoder.raw(words);
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct SystemChatMessage<'a> {
     pub json_data: &'a str,
     pub overlay: bool,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct SetTabListHeaderAndFooter<'a> {
     pub header: &'a str,
     pub footer: &'a str,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct ChatSuggestions<'a> {
     pub action: VarInt,
     pub entries: Vec<&'a str>,

@@ -13,16 +13,19 @@ use crate::packets::{counted, optional_chat};
 /// `statistics` is `count` entries of `(category, statistic, value)`, not a
 /// byte array — the count is an element count, so the derive macro cannot
 /// express it.
-#[derive(Debug, Clone)]
+use pcore_gen::Lua;
+
+#[derive(Lua, Debug, Clone)]
 pub struct AwardStatistics<'a> {
     pub statistics: Vec<Statistic<'a>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct Statistic<'a> {
     pub category_id: VarInt,
     pub statistic_id: VarInt,
     pub value: VarInt,
+    #[lua(skip)]
     _marker: std::marker::PhantomData<&'a ()>,
 }
 
@@ -94,7 +97,7 @@ impl Encode for Login<'_> {
     }
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct ChangeDifficulty {
     pub difficulty: u8,
     pub locked: bool,
@@ -102,7 +105,7 @@ pub struct ChangeDifficulty {
 
 /// Join-game packet. Hand-written `Decode` because `dimension_names` is a
 /// VarInt **count** of Identifiers, not a byte array.
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct Login<'a> {
     pub entity_id: i32,
     pub is_hardcore: bool,
@@ -186,7 +189,7 @@ impl<'a> Decode<'a> for Login<'a> {
 ///
 /// Hand-written `Decode`: the death location pair is gated by
 /// `has_death_location`, not by a per-field boolean.
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct Respawn<'a> {
     pub dimension_type: &'a str,
     pub dimension_name: &'a str,
@@ -251,14 +254,14 @@ impl Encode for Respawn<'_> {
     }
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct PlayerAbilities {
     pub flags: u8,
     pub flying_speed: f32,
     pub field_of_view_modifier: f32,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct SynchronizePlayerPosition {
     pub x: f64,
     pub y: f64,
@@ -270,51 +273,51 @@ pub struct SynchronizePlayerPosition {
     pub dismount_vehicle: bool,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct SetExperience {
     pub experience_bar: f32,
     pub level: VarInt,
     pub total_experience: VarInt,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct SetHealth {
     pub health: f32,
     pub food: VarInt,
     pub food_saturation: f32,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct SetDefaultSpawnPosition {
     pub location: u64,
     pub angle: f32,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct SetDisplayChatPreview {
     pub chat_preview_setting: bool,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct SetRenderDistance {
     pub view_distance: VarInt,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct SetSimulationDistance {
     pub simulation_distance: VarInt,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct EndCombat {
     pub duration: VarInt,
     pub entity_id: i32,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct EnterCombat {}
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct CombatDeath<'a> {
     pub player_id: VarInt,
     pub entity_id: i32,
@@ -332,7 +335,7 @@ pub const PLAYER_INFO_UPDATE_DISPLAY_NAME: i32 = 3;
 pub const PLAYER_INFO_REMOVE_PLAYER: i32 = 4;
 
 /// A signed skin/cape property.
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct PlayerProperty<'a> {
     pub name: &'a str,
     pub value: &'a str,
@@ -343,7 +346,7 @@ pub struct PlayerProperty<'a> {
 ///
 /// It is opaque key material this proxy never inspects, but it still has to be
 /// consumed to keep the cursor in sync.
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct PlayerSignatureData<'a> {
     pub timestamp: i64,
     pub public_key: &'a [u8],
@@ -352,7 +355,7 @@ pub struct PlayerSignatureData<'a> {
 
 /// One player entry of `Player Info`. Which fields are populated depends on the
 /// packet's `action`, so absent fields stay `None`.
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct PlayerInfoEntry<'a> {
     pub uuid: Uuid,
     pub name: Option<&'a str>,
@@ -364,7 +367,7 @@ pub struct PlayerInfoEntry<'a> {
 }
 
 /// `Player Info` (0x37).
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct PlayerInfo<'a> {
     pub action: VarInt,
     pub players: Vec<PlayerInfoEntry<'a>>,

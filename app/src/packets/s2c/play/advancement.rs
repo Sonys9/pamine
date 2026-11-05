@@ -10,7 +10,9 @@ use pcore::{
 use crate::packets::{counted, identifiers};
 
 /// One advancement's progress.
-#[derive(Debug, Clone)]
+use pcore_gen::Lua;
+
+#[derive(Lua, Debug, Clone)]
 pub struct AdvancementProgress<'a> {
     pub id: &'a str,
     /// `None` when the advancement has no parent.
@@ -25,7 +27,7 @@ pub struct AdvancementProgress<'a> {
 }
 
 /// The display block of an advancement.
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct AdvancementDisplay<'a> {
     pub title: &'a str,
     pub description: &'a str,
@@ -41,7 +43,7 @@ pub struct AdvancementDisplay<'a> {
 }
 
 /// One criterion of an advancement and whether it has been achieved.
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct CriterionProgress<'a> {
     pub id: &'a str,
     /// `None` when the criterion has not been achieved.
@@ -49,7 +51,7 @@ pub struct CriterionProgress<'a> {
 }
 
 /// A progress-only update: the advancement id plus its criteria states.
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct AdvancementProgressUpdate<'a> {
     pub id: &'a str,
     pub criteria: Vec<CriterionProgress<'a>>,
@@ -60,7 +62,7 @@ pub struct AdvancementProgressUpdate<'a> {
 /// Hand-written `Decode`: the advancement body is a chain of gated sections
 /// (parent, display, criteria, requirements) and the progress entries carry a
 /// per-criterion `achieved` gate.
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct UpdateAdvancements<'a> {
     pub reset: bool,
     pub added: Vec<AdvancementProgress<'a>>,
@@ -214,7 +216,7 @@ impl Encode for UpdateAdvancements<'_> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct SelectAdvancementsTab<'a> {
     pub has_id: bool,
     pub tab_id: Option<&'a str>,
@@ -242,7 +244,7 @@ impl Encode for SelectAdvancementsTab<'_> {
 }
 
 /// One ingredient of a recipe: any of `items` may be used.
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct Ingredient<'a> {
     pub items: Vec<Slot<'a>>,
 }
@@ -264,7 +266,7 @@ impl Encode for Ingredient<'_> {
 }
 
 /// The type-dependent body of a recipe.
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub enum RecipeData<'a> {
     /// `crafting_shapeless` — ingredients in any order.
     Shapeless {
@@ -306,7 +308,7 @@ pub enum RecipeData<'a> {
 }
 
 /// One recipe: a type, an identifier and a type-dependent body.
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct Recipe<'a> {
     /// The recipe type identifier, e.g. `minecraft:crafting_shaped`.
     pub kind: &'a str,
@@ -319,7 +321,7 @@ pub struct Recipe<'a> {
 /// Hand-written `Decode`: the wire order is **type first, then id**, and the
 /// body that follows has no length prefix, so it can only be delimited by
 /// knowing the layout of every recipe type.
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct UpdateRecipes<'a> {
     pub recipes: Vec<Recipe<'a>>,
 }
@@ -479,20 +481,20 @@ fn recipe_data<'a>(decoder: &mut Decoder<'a>, kind: &str) -> Result<RecipeData<'
 }
 
 /// One named tag group: an identifier and the entries it contains.
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct TagGroup<'a> {
     pub name: &'a str,
     pub entries: Vec<VarInt>,
 }
 
 /// All tag groups of one registry type.
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct TagRegistry<'a> {
     pub registry: &'a str,
     pub tags: Vec<TagGroup<'a>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct UpdateTags<'a> {
     pub registries: Vec<TagRegistry<'a>>,
 }

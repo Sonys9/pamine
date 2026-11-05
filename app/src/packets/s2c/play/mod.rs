@@ -33,9 +33,9 @@ pub use sound::*;
 pub use ui::*;
 pub use world::*;
 
-use pcore_gen::{DecodePacket, EncodePacket};
+use pcore_gen::{DecodePacket, EncodePacket, Lua};
 
-#[derive(DecodePacket, EncodePacket, Clone, Debug)]
+#[derive(DecodePacket, EncodePacket, Lua, Clone, Debug)]
 pub enum Play<'a> {
     #[id(0x00)]
     SpawnEntity(SpawnEntity),

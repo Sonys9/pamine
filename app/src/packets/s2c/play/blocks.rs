@@ -9,26 +9,28 @@ use pcore::{
 
 use crate::packets::counted;
 
-#[derive(Decode, Encode, Debug, Clone)]
+use pcore_gen::Lua;
+
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct AcknowledgeBlockChange {
     pub sequence_id: VarInt,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct SetBlockDestroyStage {
     pub entity_id: VarInt,
     pub location: u64,
     pub destroy_stage: i8,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct BlockEntityData<'a> {
     pub location: u64,
     pub kind: VarInt,
     pub nbt: NbtTag<'a>,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct BlockAction {
     pub location: u64,
     pub action_id: u8,
@@ -36,13 +38,13 @@ pub struct BlockAction {
     pub block_type: VarInt,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct BlockUpdate {
     pub location: u64,
     pub block_id: VarInt,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct OpenSignEditor {
     pub location: u64,
 }
@@ -53,7 +55,7 @@ pub struct OpenSignEditor {
 /// by 12 and the low 12 bits hold the relative position (4 bits each for x, z
 /// and y, from left to right). Reading the state as a separate VarInt consumes
 /// a byte that belongs to the next entry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Lua, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SectionBlock {
     /// The raw packed value, as it appears on the wire.
     pub packed: VarLong,
@@ -71,7 +73,7 @@ impl SectionBlock {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct UpdateSectionBlocks {
     pub chunk_section_position: i64,
     pub suppress_light_updates: bool,

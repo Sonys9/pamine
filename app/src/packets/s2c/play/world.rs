@@ -10,7 +10,9 @@ use pcore::{
 use super::particle::{ParticleData, particle_data, write_particle_data};
 use crate::packets::{counted, optional_chat};
 
-#[derive(Decode, Encode, Debug, Clone)]
+use pcore_gen::Lua;
+
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct InitializeWorldBorder {
     pub x: f64,
     pub z: f64,
@@ -24,13 +26,13 @@ pub struct InitializeWorldBorder {
     pub warning_time: VarInt,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct SetBorderCenter {
     pub x: f64,
     pub z: f64,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct SetBorderLerpSize {
     pub old_diameter: f64,
     pub new_diameter: f64,
@@ -38,28 +40,28 @@ pub struct SetBorderLerpSize {
     pub speed: VarLong,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct SetBorderSize {
     pub diameter: f64,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct SetBorderWarningDelay {
     pub warning_time: VarInt,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct SetBorderWarningDistance {
     pub warning_blocks: VarInt,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct GameEvent {
     pub event: u8,
     pub value: f32,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct WorldEvent {
     pub event: i32,
     pub location: u64,
@@ -67,21 +69,21 @@ pub struct WorldEvent {
     pub disable_relative_volume: bool,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct UpdateTime {
     pub world_age: i64,
     pub time_of_day: i64,
 }
 
 /// One destroyed block, as a signed offset from the explosion centre.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Lua, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExplosionRecord {
     pub x: i8,
     pub y: i8,
     pub z: i8,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct Explosion {
     pub x: f32,
     pub y: f32,
@@ -140,7 +142,7 @@ impl Encode for Explosion {
 /// Hand-written `Decode`: the trailing `Data` field is a union keyed by
 /// `particle_id`, so it is read through [`particle_data`] rather than left as
 /// raw bytes.
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct Particle<'a> {
     pub particle_id: VarInt,
     pub long_distance: bool,
@@ -201,7 +203,7 @@ impl Encode for Particle<'_> {
 }
 
 /// One marker drawn on a map.
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct MapIcon<'a> {
     /// Icon type, see the map icon table.
     pub kind: VarInt,
@@ -219,7 +221,7 @@ pub struct MapIcon<'a> {
 ///
 /// Hand-written `Decode`: the icon array is gated by `tracking_position`, and
 /// the pixel block is gated by `columns > 0`.
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct MapData<'a> {
     pub map_id: VarInt,
     pub scale: i8,

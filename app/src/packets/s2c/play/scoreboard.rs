@@ -7,7 +7,9 @@ use pcore::{
     errors::Error,
 };
 
-#[derive(Decode, Encode, Debug, Clone)]
+use pcore_gen::Lua;
+
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct DisplayObjective<'a> {
     pub position: u8,
     pub score_name: &'a str,
@@ -17,7 +19,7 @@ pub struct DisplayObjective<'a> {
 ///
 /// Hand-written `Decode`: `objective_value` and `kind` are present for modes 0
 /// (create) and 2 (update text), not gated by their own booleans.
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct UpdateObjectives<'a> {
     pub objective_name: &'a str,
     pub mode: u8,
@@ -56,7 +58,7 @@ impl Encode for UpdateObjectives<'_> {
 }
 
 /// The `mode`-dependent body of [`UpdateTeams`].
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub enum TeamAction<'a> {
     /// `0` — a new team is created.
     Create {
@@ -87,7 +89,7 @@ pub enum TeamAction<'a> {
     RemoveEntities { entities: Vec<&'a str> },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct UpdateTeams<'a> {
     pub team_name: &'a str,
     pub action: TeamAction<'a>,
@@ -214,7 +216,7 @@ impl Encode for UpdateTeams<'_> {
 ///
 /// Hand-written `Decode`: `value` is present for every action except 1
 /// (remove), not gated by its own boolean.
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct UpdateScore<'a> {
     pub entity_name: &'a str,
     /// 0 = create/update, 1 = remove.

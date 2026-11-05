@@ -20,6 +20,7 @@ mod decode;
 mod decode_packet;
 mod encode;
 mod encode_packet;
+mod lua;
 
 use proc_macro::TokenStream;
 use syn::{DeriveInput, parse_macro_input};
@@ -106,6 +107,37 @@ pub fn derive_encode(stream: TokenStream) -> TokenStream {
 pub fn derive_encode_packet(stream: TokenStream) -> TokenStream {
     let input = parse_macro_input!(stream as DeriveInput);
     match encode_packet::expand(&input) {
+        Ok(tokens) => tokens.into(),
+        Err(e) => e.to_compile_error().into(),
+    }
+}
+
+/// Proc macro derive for Lua table conversions.
+///
+/// Generates `IntoLua` for `T` and `&T`, plus `FromLua` for `T` when every
+/// field is owned. Types with borrowed fields (`&'a str`, `&'a [u8]`,
+/// `NbtTag<'a>`, `Slot<'a>`) get only the `IntoLua` impls: a Lua string cannot
+/// be borrowed for the packet's lifetime, so rebuilding such a value from Lua
+/// would require leaking.
+///
+/// Field mapping:
+///
+/// | Rust | Lua |
+/// |---|---|
+/// | `&'a str`, `String` | string |
+/// | `&'a [u8]`, `Vec<u8>` | string (raw bytes) |
+/// | `Option<T>` | `nil` or `T` |
+/// | `Vec<T>` | sequence table |
+/// | nested struct | table |
+///
+/// Enums become `{ type = "VariantName", value = ... }`.
+///
+/// Use `#[lua(skip)]` on a field to leave it out of the table; `FromLua` fills
+/// it with `Default::default()`.
+#[proc_macro_derive(Lua, attributes(lua))]
+pub fn derive_lua(stream: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(stream as DeriveInput);
+    match lua::expand(&input) {
         Ok(tokens) => tokens.into(),
         Err(e) => e.to_compile_error().into(),
     }

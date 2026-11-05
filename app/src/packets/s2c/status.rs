@@ -1,9 +1,9 @@
 //! Clientbound status packets (protocol 760 / 1.19.2).
 
 use pcore::Decode;
-use pcore_gen::{DecodePacket, Encode, EncodePacket};
+use pcore_gen::{DecodePacket, Encode, EncodePacket, Lua};
 
-#[derive(DecodePacket, EncodePacket, Clone, Debug)]
+#[derive(DecodePacket, EncodePacket, Lua, Clone, Debug)]
 pub enum Status<'a> {
     #[id(0x00)]
     StatusResponse(StatusResponse<'a>),
@@ -11,12 +11,12 @@ pub enum Status<'a> {
     PingResponse(PingResponse),
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct StatusResponse<'a> {
     pub json_response: &'a str,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct PingResponse {
     pub payload: i64,
 }

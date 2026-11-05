@@ -77,9 +77,9 @@ async fn scripting_stuff() {
     let result_packet_0 = engine
         .on_packet(
             0,
-            String::from("read-packet"),
+            String::from("read-inject"),
             &threshold,
-            OwnType::ReadOnly,
+            OwnType::ReadInject,
         )
         .await
         .unwrap()
@@ -88,9 +88,9 @@ async fn scripting_stuff() {
     let result_packet_1 = engine
         .on_packet(
             1,
-            String::from("read-packet"),
+            String::from("read-write"),
             &threshold,
-            OwnType::ReadOnly,
+            OwnType::ReadWrite,
         )
         .await
         .unwrap()

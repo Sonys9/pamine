@@ -6,9 +6,9 @@ use pcore::{
     encoder::Encoder,
     errors::Error,
 };
-use pcore_gen::{DecodePacket, EncodePacket};
+use pcore_gen::{DecodePacket, EncodePacket, Lua};
 
-#[derive(DecodePacket, EncodePacket, Clone, Debug)]
+#[derive(DecodePacket, EncodePacket, Lua, Clone, Debug)]
 pub enum Login<'a> {
     #[id(0x00)]
     LoginStart(LoginStart<'a>),
@@ -18,14 +18,14 @@ pub enum Login<'a> {
     LoginPluginResponse(LoginPluginResponse<'a>),
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct LoginStart<'a> {
     pub name: &'a str,
     pub sig_data: Option<SigData<'a>>,
     pub player_uuid: Option<Uuid>,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct SigData<'a> {
     pub timestamp: i64,
     pub public_key: &'a [u8],
@@ -37,7 +37,7 @@ pub struct SigData<'a> {
 /// Hand-written `Decode`: `has_verify_token` selects between two mutually
 /// exclusive tails, so neither can be an `Option` (which would read its own
 /// boolean).
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct EncryptionResponse<'a> {
     pub shared_secret: &'a [u8],
     pub has_verify_token: bool,
@@ -86,7 +86,7 @@ impl Encode for EncryptionResponse<'_> {
 ///
 /// Hand-written `Decode`: `data` is an *Optional Byte Array* — a VarInt length
 /// where `0` means absent — not a boolean-gated field.
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct LoginPluginResponse<'a> {
     pub message_id: VarInt,
     pub successful: bool,

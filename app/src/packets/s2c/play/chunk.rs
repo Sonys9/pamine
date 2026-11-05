@@ -7,7 +7,9 @@ use pcore::{
     errors::Error,
 };
 
-#[derive(Decode, Encode, Debug, Clone)]
+use pcore_gen::Lua;
+
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct UnloadChunk {
     pub chunk_x: i32,
     pub chunk_z: i32,
@@ -24,7 +26,7 @@ pub struct UnloadChunk {
 ///   not a byte length.
 /// - the light section is four BitSets followed by two length-prefixed arrays
 ///   of 2048-byte arrays.
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct ChunkDataAndUpdateLight<'a> {
     pub chunk_x: i32,
     pub chunk_z: i32,
@@ -84,7 +86,7 @@ impl Encode for ChunkDataAndUpdateLight<'_> {
 }
 
 /// One block entity inside a chunk.
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct BlockEntity<'a> {
     /// `(blockX & 15) << 4 | (blockZ & 15)`
     pub packed_xz: u8,
@@ -114,7 +116,7 @@ impl Encode for BlockEntity<'_> {
 }
 
 /// Light section shared by `Chunk Data` and `Update Light`.
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct LightData<'a> {
     pub sky_light_mask: &'a [u8],
     pub block_light_mask: &'a [u8],
@@ -192,7 +194,7 @@ fn write_light_arrays(encoder: &mut Encoder, arrays: &[&[u8]]) {
 
 /// Light-only update for a chunk. Shares the light section with
 /// [`ChunkDataAndUpdateLight`], so it needs the same hand-written `Decode`.
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct UpdateLight<'a> {
     pub chunk_x: VarInt,
     pub chunk_z: VarInt,
@@ -220,7 +222,7 @@ impl Encode for UpdateLight<'_> {
     }
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct SetCenterChunk {
     pub chunk_x: VarInt,
     pub chunk_z: VarInt,

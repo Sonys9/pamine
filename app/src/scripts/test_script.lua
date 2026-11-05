@@ -2,7 +2,7 @@
 -- `update.inject(x)`, never `update:inject(x)`.
 -- `Injection` is a userdata, so its methods use a colon: `inj:push_frame(s)`.
 
-engine:register(0, "read", function(packet_data, threshold)
+engine:register(0, "read-inject", function(packet_data, threshold)
     print("Got packet: " .. packet_data)
     print("Threshold: " .. tostring(threshold.threshold))
 
@@ -13,7 +13,7 @@ engine:register(0, "read", function(packet_data, threshold)
     return update.inject(inject)
 end)
 
-engine:register(1, "read", function(packet_data, threshold)
+engine:register(1, "read-write", function(packet_data, threshold)
     print("Got packet: " .. packet_data)
     print("Threshold: " .. tostring(threshold.threshold))
 

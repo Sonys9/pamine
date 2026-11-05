@@ -18,7 +18,9 @@ use pcore::{
 };
 
 /// The payload of a particle, keyed by its type id.
-#[derive(Debug, Clone)]
+use pcore_gen::Lua;
+
+#[derive(Lua, Debug, Clone)]
 pub enum ParticleData<'a> {
     /// The particle carries no payload.
     None,
@@ -51,7 +53,7 @@ pub enum ParticleData<'a> {
 }
 
 /// The origin of a `vibration` particle.
-#[derive(Debug, Clone, Copy)]
+#[derive(Lua, Debug, Clone, Copy)]
 pub enum VibrationSource {
     /// `0` — a block position.
     Block(u64),

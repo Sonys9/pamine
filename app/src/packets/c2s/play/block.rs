@@ -4,22 +4,22 @@ use pcore::{
     Decode,
     decoder::{VarInt, VarLong},
 };
-use pcore_gen::Encode;
+use pcore_gen::{Encode, Lua};
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct QueryBlockEntityTag {
     pub transaction_id: VarInt,
     pub location: u64,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct JigsawGenerate {
     pub location: u64,
     pub levels: VarInt,
     pub keep_jigsaws: bool,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct PlayerAction {
     pub status: VarInt,
     pub location: u64,
@@ -27,7 +27,7 @@ pub struct PlayerAction {
     pub sequence: VarInt,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct UseItemOn {
     pub hand: VarInt,
     pub location: u64,
@@ -39,13 +39,13 @@ pub struct UseItemOn {
     pub sequence: VarInt,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct UseItem {
     pub hand: VarInt,
     pub sequence: VarInt,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct UpdateSign<'a> {
     pub location: u64,
     pub line_1: &'a str,
@@ -54,7 +54,7 @@ pub struct UpdateSign<'a> {
     pub line_4: &'a str,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct ProgramCommandBlock<'a> {
     pub location: u64,
     pub command: &'a str,
@@ -62,14 +62,14 @@ pub struct ProgramCommandBlock<'a> {
     pub flags: u8,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct ProgramCommandBlockMinecart<'a> {
     pub entity_id: VarInt,
     pub command: &'a str,
     pub track_output: bool,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct ProgramJigsawBlock<'a> {
     pub location: u64,
     pub name: &'a str,
@@ -79,7 +79,7 @@ pub struct ProgramJigsawBlock<'a> {
     pub joint_type: &'a str,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct ProgramStructureBlock<'a> {
     pub location: u64,
     pub action: VarInt,

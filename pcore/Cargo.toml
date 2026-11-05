@@ -7,3 +7,10 @@ edition = "2024"
 bytemuck = "1.25.2"
 pcore-gen = { path = "../pcore-gen" }
 thiserror = "2.0.21"
+# Optional: Lua bindings for the protocol types. Off by default so the core
+# crate stays free of a scripting runtime.
+mlua = { version = "0.12.2", features = ["luajit", "send"], optional = true }
+
+[features]
+default = []
+lua = ["dep:mlua"]

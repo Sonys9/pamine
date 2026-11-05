@@ -3,6 +3,8 @@ use crate::errors::Error;
 pub mod decoder;
 pub mod encoder;
 pub mod errors;
+#[cfg(feature = "lua")]
+pub mod lua;
 
 pub trait Decode<'a>: Sized {
     fn decode(decoder: &mut decoder::Decoder<'a>) -> Result<Self, Error>;

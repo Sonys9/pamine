@@ -8,7 +8,9 @@ use pcore::{
 };
 
 /// The `action`-dependent body of [`BossBar`].
-#[derive(Debug, Clone)]
+use pcore_gen::Lua;
+
+#[derive(Lua, Debug, Clone)]
 pub enum BossBarAction<'a> {
     /// `0` — a new bar appears.
     Add {
@@ -30,7 +32,7 @@ pub enum BossBarAction<'a> {
     UpdateFlags { flags: u8 },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct BossBar<'a> {
     pub uuid: Uuid,
     pub action: BossBarAction<'a>,
@@ -113,27 +115,27 @@ impl Encode for BossBar<'_> {
     }
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct ClearTitles {
     pub reset: bool,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct SetActionBarText<'a> {
     pub action_bar_text: &'a str,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct SetSubtitleText<'a> {
     pub subtitle_text: &'a str,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct SetTitleText<'a> {
     pub title_text: &'a str,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct SetTitleAnimationTimes {
     pub fade_in: i32,
     pub stay: i32,

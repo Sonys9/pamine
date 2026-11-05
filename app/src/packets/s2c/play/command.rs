@@ -13,14 +13,16 @@ use crate::{
 };
 
 /// One entry of a tab-completion response.
-#[derive(Debug, Clone)]
+use pcore_gen::Lua;
+
+#[derive(Lua, Debug, Clone)]
 pub struct SuggestionMatch<'a> {
     pub text: &'a str,
     /// The tooltip is a `bool`-gated chat component.
     pub tooltip: Option<&'a str>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct CommandSuggestionsResponse<'a> {
     pub id: VarInt,
     pub start: VarInt,
@@ -72,7 +74,7 @@ impl Encode for CommandSuggestionsResponse<'_> {
 
 /// The command graph. `nodes` is a VarInt **count** of variable-length node
 /// structures, so it has to be parsed element by element.
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct Commands<'a> {
     pub nodes: Vec<CommandNode<'a>>,
     pub root_index: VarInt,
@@ -91,7 +93,7 @@ pub enum CommandNodeKind {
 /// Parsers without properties map to [`CommandParser::None`]; the ones that do
 /// carry data are modelled explicitly so the cursor always lands on the next
 /// node.
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub enum CommandParser<'a> {
     /// No properties on the wire.
     None,
@@ -117,7 +119,7 @@ pub enum CommandParser<'a> {
 ///
 /// `flags` bit 0x03 selects the node type, 0x04 marks an executable node,
 /// 0x08 a redirect, 0x10 a suggestions type and 0x20 a restricted node.
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct CommandNode<'a> {
     pub flags: u8,
     pub children: Vec<VarInt>,

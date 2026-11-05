@@ -10,7 +10,9 @@ use pcore::{
 use super::particle::{ParticleData, particle_data, write_particle_data};
 use crate::packets::{counted, optional_chat};
 
-#[derive(Decode, Encode, Debug, Clone)]
+use pcore_gen::Lua;
+
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct SpawnEntity {
     pub entity_id: VarInt,
     pub entity_uuid: Uuid,
@@ -27,7 +29,7 @@ pub struct SpawnEntity {
     pub velocity_z: i16,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct SpawnExperienceOrb {
     pub entity_id: VarInt,
     pub x: f64,
@@ -36,7 +38,7 @@ pub struct SpawnExperienceOrb {
     pub count: i16,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct SpawnPlayer {
     pub entity_id: VarInt,
     pub player_uuid: Uuid,
@@ -47,19 +49,19 @@ pub struct SpawnPlayer {
     pub pitch: u8,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct EntityAnimation {
     pub entity_id: VarInt,
     pub animation: u8,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct EntityEvent {
     pub entity_id: i32,
     pub entity_status: i8,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct UpdateEntityPosition {
     pub entity_id: VarInt,
     pub delta_x: i16,
@@ -68,7 +70,7 @@ pub struct UpdateEntityPosition {
     pub on_ground: bool,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct UpdateEntityPositionAndRotation {
     pub entity_id: VarInt,
     pub delta_x: i16,
@@ -79,7 +81,7 @@ pub struct UpdateEntityPositionAndRotation {
     pub on_ground: bool,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct UpdateEntityRotation {
     pub entity_id: VarInt,
     pub yaw: u8,
@@ -87,7 +89,7 @@ pub struct UpdateEntityRotation {
     pub on_ground: bool,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct MoveVehicle {
     pub x: f64,
     pub y: f64,
@@ -100,7 +102,7 @@ pub struct MoveVehicle {
 ///
 /// Hand-written `Decode`: `entity_id` and `entity_feet_eyes` are gated by
 /// `is_entity`, not by their own booleans.
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct LookAt {
     /// 0 = feet, 1 = eyes.
     pub feet_eyes: VarInt,
@@ -151,7 +153,7 @@ impl Encode for LookAt {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct RemoveEntities {
     pub entity_ids: Vec<VarInt>,
 }
@@ -169,19 +171,19 @@ impl Encode for RemoveEntities {
     }
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct RemoveEntityEffect {
     pub entity_id: VarInt,
     pub effect_id: VarInt,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct SetHeadRotation {
     pub entity_id: VarInt,
     pub head_yaw: u8,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct SetCamera {
     pub camera_id: VarInt,
 }
@@ -191,7 +193,7 @@ pub struct SetCamera {
 /// The wire format is `index: u8, type: VarInt, value: <type>`. The index only
 /// says *which* property this is; the type says how to read the value, so the
 /// two must not be confused.
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct MetadataEntry<'a> {
     pub index: u8,
     pub value: MetadataValue<'a>,
@@ -204,7 +206,7 @@ pub struct MetadataEntry<'a> {
 /// `OptUuid`/`OptBlockId` with `OptLivingEntityRef` and dropped `NBT`, which
 /// shifts every id after `Float`. Using the newer table desynchronises every
 /// metadata entry.
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub enum MetadataValue<'a> {
     Byte(i8),
     VarInt(VarInt),
@@ -418,7 +420,7 @@ impl<'a> MetadataValue<'a> {
 ///
 /// Hand-written `Decode`: entries are `index, type, value` triples terminated
 /// by a `0xFF` index byte, and the value layout comes from the type.
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct SetEntityMetadata<'a> {
     pub entity_id: VarInt,
     pub metadata: Vec<MetadataEntry<'a>>,
@@ -456,13 +458,13 @@ impl Encode for SetEntityMetadata<'_> {
     }
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct LinkEntities {
     pub attached_entity_id: i32,
     pub holding_entity_id: i32,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct SetEntityVelocity {
     pub entity_id: VarInt,
     pub velocity_x: i16,
@@ -471,13 +473,13 @@ pub struct SetEntityVelocity {
 }
 
 /// One equipped item. `slot` is the raw equipment-slot id (0-5).
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct EquipmentEntry<'a> {
     pub slot: i8,
     pub item: Slot<'a>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct SetEquipment<'a> {
     pub entity_id: VarInt,
     pub equipment: Vec<EquipmentEntry<'a>>,
@@ -536,7 +538,7 @@ impl Encode for SetEquipment<'_> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct SetPassengers {
     pub entity_id: VarInt,
     pub passengers: Vec<VarInt>,
@@ -560,14 +562,14 @@ impl Encode for SetPassengers {
     }
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct PickupItem {
     pub collected_entity_id: VarInt,
     pub collector_entity_id: VarInt,
     pub pickup_item_count: VarInt,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct TeleportEntity {
     pub entity_id: VarInt,
     pub x: f64,
@@ -579,7 +581,7 @@ pub struct TeleportEntity {
 }
 
 /// One attribute modifier.
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct AttributeModifier {
     pub uuid: Uuid,
     pub amount: f64,
@@ -587,14 +589,14 @@ pub struct AttributeModifier {
 }
 
 /// One attribute of an entity, with its base value and modifiers.
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct AttributeEntry<'a> {
     pub key: &'a str,
     pub value: f64,
     pub modifiers: Vec<AttributeModifier>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct UpdateAttributes<'a> {
     pub entity_id: VarInt,
     pub properties: Vec<AttributeEntry<'a>>,
@@ -659,7 +661,7 @@ impl Encode for UpdateAttributes<'_> {
 ///
 /// `factor_data` is gated by a boolean on the wire; `Option<NbtTag>` reads that
 /// boolean itself, so there is no separate `has_factor_data` field.
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct EntityEffect<'a> {
     pub entity_id: VarInt,
     pub effect_id: VarInt,

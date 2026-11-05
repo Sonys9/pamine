@@ -7,13 +7,15 @@ use pcore::{
     errors::Error,
 };
 
-#[derive(Decode, Encode, Debug, Clone)]
+use pcore_gen::Lua;
+
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct ClickContainerButton {
     pub window_id: i8,
     pub button_id: i8,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Lua, Debug, Clone)]
 pub struct ClickContainer<'a> {
     pub window_id: u8,
     pub state_id: VarInt,
@@ -75,12 +77,12 @@ impl Encode for ClickContainer<'_> {
     }
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct CloseContainer {
     pub window_id: u8,
 }
 
-#[derive(Decode, Encode, Debug, Clone)]
+#[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct SetCreativeModeSlot<'a> {
     pub slot: i16,
     /// A single Slot: `bool present + VarInt id + i8 count + NBT`.
