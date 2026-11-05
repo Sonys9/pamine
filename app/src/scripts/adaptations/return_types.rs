@@ -128,14 +128,12 @@ impl IntoLua for UpdateBindings {
 
         table.set(
             "both",
-            lua.create_function(
-                |lua, (change_with, inject): (Injection, Injection)| {
-                    let table = UpdateBindings::none(lua)?;
-                    table.set("change_with", change_with)?;
-                    table.set("inject", inject)?;
-                    Ok(table)
-                },
-            )?,
+            lua.create_function(|lua, (change_with, inject): (Injection, Injection)| {
+                let table = UpdateBindings::none(lua)?;
+                table.set("change_with", change_with)?;
+                table.set("inject", inject)?;
+                Ok(table)
+            })?,
         )?;
 
         table.set(
@@ -150,9 +148,12 @@ impl IntoLua for UpdateBindings {
 /// Converts the table built by `update.*` back into an [`Update`].
 impl FromLua for Update {
     fn from_lua(value: LuaValue, _lua: &Lua) -> LuaResult<Self> {
-        let table = value
-            .as_table()
-            .ok_or_else(|| LuaError::runtime(format!("expected an Update table, got {}", value.type_name())))?;
+        let table = value.as_table().ok_or_else(|| {
+            LuaError::runtime(format!(
+                "expected an Update table, got {}",
+                value.type_name()
+            ))
+        })?;
 
         Ok(Update {
             change_with: table.get::<Option<Injection>>("change_with")?,

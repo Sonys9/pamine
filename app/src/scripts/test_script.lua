@@ -1,5 +1,3 @@
-print("Running lua code")
-
 -- `update` is a plain table of constructors, so it is called with a dot:
 -- `update.inject(x)`, never `update:inject(x)`.
 -- `Injection` is a userdata, so its methods use a colon: `inj:push_frame(s)`.

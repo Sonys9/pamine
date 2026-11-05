@@ -3,7 +3,11 @@ use std::{env, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::net::TcpListener;
 use tracing::{error, info};
 
-use crate::{connections::Connector, packets::UnsureThreshold, scripts::Engine};
+use crate::{
+    connections::Connector,
+    packets::UnsureThreshold,
+    scripts::{Engine, OwnType},
+};
 
 mod buffer;
 mod connections;
@@ -14,7 +18,7 @@ mod scripts;
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    
+
     scripting_stuff().await;
     todo!("Stopped after doing the scripting stuff");
 
@@ -61,15 +65,37 @@ async fn scripting_stuff() {
     tokio::spawn({
         let engine = engine.clone(); // Doesn't really cost anything because that's an Arc<...>
         async move {
-            engine.run(include_str!("scripts/test_script.lua")).await.unwrap();
+            engine
+                .run(include_str!("scripts/test_script.lua"))
+                .await
+                .unwrap();
         }
     });
     let threshold = UnsureThreshold::new();
     threshold.set(256);
     tokio::time::sleep(Duration::from_millis(200)).await; // Wait till it loads
-    let result_packet_0 = engine.on_packet(0, String::from("read"), &threshold, "read").await.unwrap();
+    let result_packet_0 = engine
+        .on_packet(
+            0,
+            String::from("read-packet"),
+            &threshold,
+            OwnType::ReadOnly,
+        )
+        .await
+        .unwrap()
+        .unwrap();
     info!("Result with packet 0: {:?}", result_packet_0);
-    let result_packet_1 = engine.on_packet(1, String::from("read"), &threshold, "read").await.unwrap();
+    let result_packet_1 = engine
+        .on_packet(
+            1,
+            String::from("read-packet"),
+            &threshold,
+            OwnType::ReadOnly,
+        )
+        .await
+        .unwrap()
+        .unwrap();
     info!("Result with packet 1: {:?}", result_packet_1);
+
     tokio::time::sleep(Duration::from_millis(400)).await; // And till it handles it
 }

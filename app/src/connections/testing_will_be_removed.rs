@@ -21,15 +21,20 @@ use pcore::decoder::VarInt;
 use tracing::{error, info};
 
 use crate::{
-    connections::{Injection, Update}, ids, packets::{
-        Packet::{self, C2S, S2C}, UnsureThreshold, c2s::{
+    connections::{Injection, Update},
+    ids,
+    packets::{
+        Packet::{self, C2S, S2C},
+        UnsureThreshold,
+        c2s::{
             self,
             packets::C2SPacket,
             play::{
                 ChatCommand, ChatMessage, ConfirmTeleportation, SetCreativeModeSlot,
                 SetPlayerPosition,
             },
-        }, s2c::{self, packets::S2CPacket, play::SynchronizePlayerPosition, status::StatusResponse},
+        },
+        s2c::{self, packets::S2CPacket, play::SynchronizePlayerPosition, status::StatusResponse},
     },
 };
 
@@ -67,7 +72,9 @@ pub fn on_packet(packet: &Packet<'_>, threshold: &UnsureThreshold, is_injected: 
             on_creative_slot(packet)
         }
         C2S(C2SPacket::Play(c2s::play::Play::ConfirmTeleportation(packet))) => on_confirm(packet),
-        S2C(S2CPacket::Status(s2c::status::Status::StatusResponse(packet))) => on_status(packet, threshold),
+        S2C(S2CPacket::Status(s2c::status::Status::StatusResponse(packet))) => {
+            on_status(packet, threshold)
+        }
         _ => return Update::none(),
     };
 
@@ -80,10 +87,17 @@ pub fn on_packet(packet: &Packet<'_>, threshold: &UnsureThreshold, is_injected: 
 fn on_status(packet: &StatusResponse, threshold: &UnsureThreshold) -> eyre::Result<Update> {
     let change_to = "{\"previewsChat\":false,\"enforcesSecureChat\":false,\"description\":{\"text\":\"blah blah\"},\"players\":{\"max\":1337,\"online\":111},\"version\":{\"name\":\"Sigma 1.33.7\",\"protocol\":760}}";
     info!("Json response: {:?}", packet.json_response);
-    info!("We're not deserealizing it so lets change it to {}", change_to);
+    info!(
+        "We're not deserealizing it so lets change it to {}",
+        change_to
+    );
     let mut packet = packet.clone();
     packet.json_response = change_to;
-    Ok(Update::change(Injection::from_packet(&s2c::status::Status::StatusResponse(packet), threshold, false)?))
+    Ok(Update::change(Injection::from_packet(
+        &s2c::status::Status::StatusResponse(packet),
+        threshold,
+        false,
+    )?))
 }
 
 fn on_confirm(packet: &ConfirmTeleportation) -> eyre::Result<Update> {
@@ -127,7 +141,11 @@ fn spoof_okay(
 ) -> eyre::Result<Update> {
     let mut message_packet = message_packet.clone();
     message_packet.message = "Script chain is working!";
-    Ok(Update::change(Injection::from_packet(&c2s::play::Play::ChatMessage(message_packet), threshold, true)?))
+    Ok(Update::change(Injection::from_packet(
+        &c2s::play::Play::ChatMessage(message_packet),
+        threshold,
+        true,
+    )?))
 }
 
 /// Teleports the client by injecting a clientbound `Synchronize Player Position`.
