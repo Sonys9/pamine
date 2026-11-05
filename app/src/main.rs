@@ -1,4 +1,4 @@
-use std::{env, net::SocketAddr, sync::Arc};
+use std::{env, net::SocketAddr, sync::Arc, time::Duration};
 
 use tokio::net::TcpListener;
 use tracing::{error, info};
@@ -14,6 +14,10 @@ mod scripts;
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
+    
+    scripting_stuff().await;
+    todo!("Stopped after doing the scripting stuff");
+
     dotenvy::dotenv().expect("Failed to initialize .env. Make sure you created the file");
 
     let bind_addr: SocketAddr = env::var("BIND_ADDR")
@@ -33,13 +37,6 @@ async fn main() {
 
     info!("listening on {bind_addr}");
 
-    let engine = Engine::new().unwrap();
-    engine.set_globals().await.unwrap();
-    tokio::spawn(async move {
-        engine.run(include_str!("scripts/test_script.lua")).await.unwrap();
-    });
-
-
     loop {
         let (stream, addr) = match listener.accept().await {
             Ok(accepted) => accepted,
@@ -56,4 +53,20 @@ async fn main() {
             }
         });
     }
+}
+
+async fn scripting_stuff() {
+    let engine = Engine::new().unwrap();
+    engine.set_globals().unwrap();
+    tokio::spawn({
+        let engine = engine.clone(); // Doesn't really cost anything because that's an Arc<...>
+        async move {
+            engine.run(include_str!("scripts/test_script.lua")).await.unwrap();
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(200)).await; // Wait till it loads
+    info!("Sending the packet");
+    engine.on_packet(0, String::from("Foo")).await.unwrap();
+    info!("Done");
+    tokio::time::sleep(Duration::from_secs(2)).await; // And till it handles it
 }
