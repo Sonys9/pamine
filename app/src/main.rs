@@ -3,7 +3,7 @@ use std::{env, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::net::TcpListener;
 use tracing::{error, info};
 
-use crate::{connections::Connector, scripts::Engine};
+use crate::{connections::Connector, packets::UnsureThreshold, scripts::Engine};
 
 mod buffer;
 mod connections;
@@ -64,9 +64,12 @@ async fn scripting_stuff() {
             engine.run(include_str!("scripts/test_script.lua")).await.unwrap();
         }
     });
+    let threshold = UnsureThreshold::new();
+    threshold.set(256);
     tokio::time::sleep(Duration::from_millis(200)).await; // Wait till it loads
-    info!("Sending the packet");
-    engine.on_packet(0, String::from("Foo")).await.unwrap();
-    info!("Done");
-    tokio::time::sleep(Duration::from_secs(2)).await; // And till it handles it
+    let result_packet_0 = engine.on_packet(0, String::from("read"), &threshold, "read").await.unwrap();
+    info!("Result with packet 0: {:?}", result_packet_0);
+    let result_packet_1 = engine.on_packet(1, String::from("read"), &threshold, "read").await.unwrap();
+    info!("Result with packet 1: {:?}", result_packet_1);
+    tokio::time::sleep(Duration::from_millis(400)).await; // And till it handles it
 }

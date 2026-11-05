@@ -1,9 +1,11 @@
-use std::{cell::RefCell, rc::Rc, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use mlua::{StdLib, prelude::*, Function};
 use tokio::sync::Mutex;
 
-use crate::packets::Packet;
+use crate::{connections::Update, packets::UnsureThreshold, scripts::adaptations::UpdateBindings};
+
+mod adaptations;
 
 // Cheap to copy because Lua is Arc + bool
 #[derive(Debug, Clone)]
@@ -30,6 +32,8 @@ impl Engine {
 
         self.lua.globals().set("sleep", sleep_binding)?;
         self.lua.globals().set("engine", self.clone())?;
+        self.lua.globals().set("update", UpdateBindings)?;
+        
         Ok(())
     }
 
@@ -37,20 +41,22 @@ impl Engine {
         self.lua.load(code).exec_async().await
     }
 
-    pub async fn register(&self, packet_id: u8, own_type: String, func: Function) -> LuaResult<()> {
+    async fn register(&self, packet_id: u8, own_type: String, func: Function) -> LuaResult<()> {
         let key = self.lua.create_registry_value(func)?;
         self.handlers.lock().await[packet_id as usize] = Some((key, own_type));
         Ok(())
     }
 
-    pub async fn on_packet(&self, packet_id: u8, packet: String) -> LuaResult<()> {
+    pub async fn on_packet(&self, packet_id: u8, packet: String, threshold: &UnsureThreshold, own_type: &str) -> LuaResult<Option<Update>> {
         let handlers = self.handlers.lock().await;
-        let Some((ref registry_key, ref own_type)) = handlers[packet_id as usize] else {
-            return Ok(());
+        let Some((ref registry_key, ref handler_own_type)) = handlers[packet_id as usize] else {
+            return Ok(None);
+        };
+        if handler_own_type != own_type {
+            return Ok(None);
         };
         let func: Function = self.lua.registry_value(registry_key)?;
-        func.call_async::<()>(packet).await?;
-        Ok(())
+        Ok(Some(func.call_async::<Update>((packet, threshold)).await?))
     }
 }
 
