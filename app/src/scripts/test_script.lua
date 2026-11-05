@@ -1,8 +1,5 @@
-print("This is a test script, jit version: " .. jit.version)
+print("Running lua code")
 
-for i = 0, 100, 10 do
-    print("Imitating a load: " .. i .. "%")
-    sleep(100) -- Sleeping 100 ms
-end
-
-print("Loaded")
+engine.register(0, "read", functon(packet_data)
+    print("Got packet: " .. packet_data)
+end)

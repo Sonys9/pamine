@@ -3,7 +3,7 @@ use std::{env, net::SocketAddr, sync::Arc};
 use tokio::net::TcpListener;
 use tracing::{error, info};
 
-use crate::connections::Connector;
+use crate::{connections::Connector, scripts::Engine};
 
 mod buffer;
 mod connections;
@@ -33,8 +33,12 @@ async fn main() {
 
     info!("listening on {bind_addr}");
 
-    // info!("Running the lua script");
-    // scripts::run(include_str!("scripts/test_script.lua")).await.unwrap();
+    let engine = Engine::new().unwrap();
+    engine.set_globals().await.unwrap();
+    tokio::spawn(async move {
+        engine.run(include_str!("scripts/test_script.lua")).await.unwrap();
+    });
+
 
     loop {
         let (stream, addr) = match listener.accept().await {
