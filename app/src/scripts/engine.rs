@@ -4,9 +4,7 @@ use mlua::{Function, StdLib, prelude::*};
 use tokio::sync::Mutex;
 
 use crate::{
-    connections::Update,
-    packets::UnsureThreshold,
-    scripts::{
+    connections::Update, packets::{Packet, UnsureThreshold}, scripts::{
         OwnType,
         adaptations::{NbtBindings, UpdateBindings},
     },
@@ -59,7 +57,7 @@ impl Engine {
     pub async fn on_packet(
         &self,
         packet_id: u8,
-        packet: String,
+        packet: Packet<'_>,
         threshold: &UnsureThreshold,
         own_type: OwnType,
     ) -> LuaResult<Option<Option<Update>>> {
@@ -72,7 +70,7 @@ impl Engine {
         };
         let func: Function = self.lua.registry_value(registry_key)?;
         let result = func
-            .call_async::<Option<Update>>((packet, threshold))
+            .call_async::<Option<Update>>(HandlerOptions(&packet, threshold))
             .await?;
         Ok(Some(match (result, own_type) {
             // Returning nothing means "leave the packet alone" and is always allowed.
@@ -116,5 +114,22 @@ impl LuaUserData for Engine {
                 async move { this.register(packet_id, own_type, func).await }
             },
         );
+    }
+}
+
+/// What a script handler receives: the decoded packet plus the compression
+/// threshold in effect for this connection.
+///
+/// A wrapper rather than a bare tuple so the Lua side gets named fields
+/// (`opts.packet`, `opts.threshold`) instead of positional arguments that
+/// silently shift if the signature ever changes.
+pub struct HandlerOptions<'a>(pub &'a Packet<'a>, pub &'a UnsureThreshold);
+
+impl IntoLua for HandlerOptions<'_> {
+    fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
+        let table = lua.create_table()?;
+        table.set("packet", self.0)?;
+        table.set("threshold", self.1)?;
+        Ok(LuaValue::Table(table))
     }
 }

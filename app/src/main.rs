@@ -5,7 +5,10 @@ use tracing::{error, info};
 
 use crate::{
     connections::Connector,
-    packets::UnsureThreshold,
+    packets::{
+        Packet, UnsureThreshold,
+        c2s::{self, packets::C2SPacket},
+    },
     scripts::{Engine, OwnType},
 };
 
@@ -74,24 +77,17 @@ async fn scripting_stuff() {
     let threshold = UnsureThreshold::new();
     threshold.set(256);
     tokio::time::sleep(Duration::from_millis(200)).await; // Wait till it loads
+    let packet = Packet::C2S(C2SPacket::Status(c2s::status::Status::PingRequest(
+        c2s::status::PingRequest { payload: 42 },
+    )));
     let result_packet_0 = engine
-        .on_packet(
-            0,
-            String::from("read-inject"),
-            &threshold,
-            OwnType::ReadInject,
-        )
+        .on_packet(0, packet.clone(), &threshold, OwnType::ReadInject)
         .await
         .unwrap()
         .unwrap();
     info!("Result with packet 0: {:?}", result_packet_0);
     let result_packet_1 = engine
-        .on_packet(
-            1,
-            String::from("read-write"),
-            &threshold,
-            OwnType::ReadWrite,
-        )
+        .on_packet(1, packet, &threshold, OwnType::ReadWrite)
         .await
         .unwrap()
         .unwrap();

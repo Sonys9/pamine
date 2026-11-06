@@ -2,6 +2,8 @@
 
 use std::sync::atomic::{AtomicU8, Ordering};
 
+use pcore_gen::Lua;
+
 use crate::packets::{c2s::packets::C2SPacket, s2c::packets::S2CPacket};
 
 /// Outcome of a single parse attempt.
@@ -115,7 +117,7 @@ impl TryFrom<State> for u8 {
 }
 
 /// A decoded packet, tagged with the direction it travelled.
-#[derive(Clone, Debug)]
+#[derive(Lua, Clone, Debug)]
 pub enum Packet<'a> {
     C2S(C2SPacket<'a>),
     S2C(S2CPacket<'a>),
