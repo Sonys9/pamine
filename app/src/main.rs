@@ -4,12 +4,10 @@ use tokio::net::TcpListener;
 use tracing::{error, info};
 
 use crate::{
-    connections::Connector,
-    packets::{
+    connections::Connector, packets::{
         Packet, UnsureThreshold,
         c2s::{self, packets::C2SPacket},
-    },
-    scripts::{Engine, OwnType},
+    }, scripts::{Engine, HandlerOptions, OwnType},
 };
 
 mod buffer;
@@ -81,13 +79,13 @@ async fn scripting_stuff() {
         c2s::status::PingRequest { payload: 42 },
     )));
     let result_packet_0 = engine
-        .on_packet(0, packet.clone(), &threshold, OwnType::ReadInject)
+        .on_packet(0, HandlerOptions::new(&packet, &threshold, true), OwnType::ReadInject)
         .await
         .unwrap()
         .unwrap();
     info!("Result with packet 0: {:?}", result_packet_0);
     let result_packet_1 = engine
-        .on_packet(1, packet, &threshold, OwnType::ReadWrite)
+        .on_packet(1, HandlerOptions::new(&packet, &threshold, false), OwnType::ReadWrite)
         .await
         .unwrap()
         .unwrap();

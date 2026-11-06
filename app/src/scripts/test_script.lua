@@ -1,7 +1,7 @@
 -- Handlers receive one table: `opts.packet` and `opts.threshold`.
 
 engine:register(0, "read-inject", function(opts)
-    print("Got packet: " .. tostring(opts.packet.value.value.type))
+    print("Got packet: " .. tostring(opts.packet.value.value.type) .. " is injected: " .. opts.is_injected)
 
     -- Correct pair: particle_id 24 (dust) with Dust payload.
     local ok = s2c.play.SetEntityMetadata {
@@ -27,7 +27,7 @@ engine:register(0, "read-inject", function(opts)
 end)
 
 engine:register(1, "read-write", function(opts)
-    print("Got packet: " .. tostring(opts.packet.value.value.type))
+    print("Got packet: " .. tostring(opts.packet.value.value.type) .. " is injected: " .. opts.is_injected)
 
     -- Mismatched pair: particle_id 24 (dust) but BlockState payload.
     -- This must be rejected, not written.

@@ -90,8 +90,7 @@ impl Engine {
     pub async fn on_packet(
         &self,
         packet_id: u8,
-        packet: Packet<'_>,
-        threshold: &UnsureThreshold,
+        options: HandlerOptions<'_>,
         own_type: OwnType,
     ) -> LuaResult<Option<Option<Update>>> {
         let handlers = self.handlers.lock().await;
@@ -103,7 +102,7 @@ impl Engine {
         };
         let func: Function = self.lua.registry_value(registry_key)?;
         let result = func
-            .call_async::<Option<Update>>(HandlerOptions(&packet, threshold))
+            .call_async::<Option<Update>>(options)
             .await?;
         Ok(Some(match (result, own_type) {
             // Returning nothing means "leave the packet alone" and is always allowed.
@@ -156,13 +155,24 @@ impl LuaUserData for Engine {
 /// A wrapper rather than a bare tuple so the Lua side gets named fields
 /// (`opts.packet`, `opts.threshold`) instead of positional arguments that
 /// silently shift if the signature ever changes.
-pub struct HandlerOptions<'a>(pub &'a Packet<'a>, pub &'a UnsureThreshold);
+pub struct HandlerOptions<'a> {
+    pub packet: &'a Packet<'a>,
+    pub threshold: &'a UnsureThreshold,
+    pub is_injected: bool,
+}
+
+impl<'a> HandlerOptions<'a> {
+    pub fn new(packet: &'a Packet<'a>, threshold: &'a UnsureThreshold, is_injected: bool) -> Self {
+        Self { packet, threshold, is_injected }
+    }
+}
 
 impl IntoLua for HandlerOptions<'_> {
     fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
         let table = lua.create_table()?;
-        table.set("packet", self.0)?;
-        table.set("threshold", self.1)?;
+        table.set("packet", self.packet)?;
+        table.set("threshold", self.threshold)?;
+        table.set("is_injected", self.is_injected)?;
         Ok(LuaValue::Table(table))
     }
 }
