@@ -99,6 +99,29 @@ fn is_raw(field: &syn::Field) -> bool {
     })
 }
 
+/// Reads `#[lua(validate = "path::to::fn")]` from a variant.
+///
+/// The generated arm calls `path(table)?` before encoding anything, which lets
+/// a variant reject a table whose fields are individually well-typed but
+/// mutually inconsistent — e.g. a particle id that does not match the payload
+/// variant. Without it the bytes would be written and the peer would
+/// desynchronise.
+fn variant_validate(variant: &syn::Variant) -> syn::Result<Option<syn::Path>> {
+    let Some(attr) = variant.attrs.iter().find(|a| a.path().is_ident("lua")) else {
+        return Ok(None);
+    };
+    let mut path = None;
+    attr.parse_nested_meta(|meta| {
+        if meta.path.is_ident("validate") {
+            let value = meta.value()?;
+            let lit: syn::LitStr = value.parse()?;
+            path = Some(lit.parse::<syn::Path>()?);
+        }
+        Ok(())
+    })?;
+    Ok(path)
+}
+
 /// True when the field is marked `#[lua(skip)]`.
 fn is_skipped(field: &syn::Field) -> bool {
     field.attrs.iter().any(|attr| {
@@ -529,6 +552,14 @@ fn expand_value_enum(
         check_duplicate_id(&mut seen, &tag, variant)?;
         let key = variant_name.to_string();
 
+        // `#[lua(validate = "path")]` runs before anything is written, so a
+        // table whose fields are individually valid but mutually inconsistent
+        // is rejected instead of producing bytes the peer cannot parse.
+        let validate = match variant_validate(variant)? {
+            Some(path) => quote! { #path(table)?; },
+            None => quote! {},
+        };
+
         let body = match &variant.fields {
             Fields::Unit => quote! {},
             Fields::Named(named) => {
@@ -554,6 +585,7 @@ fn expand_value_enum(
 
         arms.push(quote! {
             #key => {
+                #validate
                 encoder.varint(#tag);
                 #body
             }

@@ -66,15 +66,15 @@ pub enum VibrationSource {
 }
 
 /// 1.19.2 particle ids that carry a payload.
-const PARTICLE_BLOCK: i32 = 3;
-const PARTICLE_BLOCK_MARKER: i32 = 4;
-const PARTICLE_DUST: i32 = 24;
-const PARTICLE_DUST_COLOR_TRANSITION: i32 = 25;
-const PARTICLE_FALLING_DUST: i32 = 37;
-const PARTICLE_ITEM: i32 = 53;
-const PARTICLE_SCULK_CHARGE: i32 = 69;
-const PARTICLE_SHRIEK: i32 = 72;
-const PARTICLE_VIBRATION: i32 = 86;
+pub(crate) const PARTICLE_BLOCK: i32 = 3;
+pub(crate) const PARTICLE_BLOCK_MARKER: i32 = 4;
+pub(crate) const PARTICLE_DUST: i32 = 24;
+pub(crate) const PARTICLE_DUST_COLOR_TRANSITION: i32 = 25;
+pub(crate) const PARTICLE_FALLING_DUST: i32 = 37;
+pub(crate) const PARTICLE_ITEM: i32 = 53;
+pub(crate) const PARTICLE_SCULK_CHARGE: i32 = 69;
+pub(crate) const PARTICLE_SHRIEK: i32 = 72;
+pub(crate) const PARTICLE_VIBRATION: i32 = 86;
 
 /// Reads the payload that follows a particle type id.
 ///

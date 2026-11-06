@@ -7,7 +7,11 @@ use pcore::{
     errors::Error,
 };
 
-use super::particle::{ParticleData, particle_data, write_particle_data};
+use super::particle::{
+    PARTICLE_BLOCK, PARTICLE_BLOCK_MARKER, PARTICLE_DUST, PARTICLE_DUST_COLOR_TRANSITION,
+    PARTICLE_FALLING_DUST, PARTICLE_ITEM, PARTICLE_SCULK_CHARGE, PARTICLE_SHRIEK,
+    PARTICLE_VIBRATION, ParticleData, particle_data, write_particle_data,
+};
 use crate::packets::{counted, optional_chat};
 
 use pcore_gen::{Lua, LuaPacket};
@@ -200,6 +204,39 @@ pub struct MetadataEntry<'a> {
     pub value: MetadataValue<'a>,
 }
 
+/// Rejects a `Particle` metadata entry whose `particle_id` does not match the
+/// payload variant.
+///
+/// The two fields are independent on the wire: the id selects the payload
+/// layout, and the payload carries no id of its own. A mismatched pair would
+/// be written as-is and the peer would read the payload with the wrong layout,
+/// desynchronising every field after it. Rejecting here turns a silent stream
+/// corruption into a script error.
+fn validate_particle(table: &mlua::Table) -> mlua::Result<()> {
+    let particle_id: i32 = table.get("particle_id")?;
+    let data: mlua::Table = table.get("data")?;
+    let variant: String = data.get("type")?;
+
+    // The id table from `particle_data`: several ids share one layout.
+    let expected = match particle_id {
+        PARTICLE_BLOCK | PARTICLE_BLOCK_MARKER | PARTICLE_FALLING_DUST => "BlockState",
+        PARTICLE_DUST => "Dust",
+        PARTICLE_DUST_COLOR_TRANSITION => "DustColorTransition",
+        PARTICLE_ITEM => "Item",
+        PARTICLE_VIBRATION => "Vibration",
+        PARTICLE_SCULK_CHARGE => "SculkCharge",
+        PARTICLE_SHRIEK => "Shriek",
+        _ => "None",
+    };
+
+    if variant != expected {
+        return Err(mlua::Error::runtime(format!(
+            "particle_id {particle_id} expects data.type = {expected:?}, got {variant:?}"
+        )));
+    }
+    Ok(())
+}
+
 /// The metadata value types of protocol 760.
 ///
 /// This is the **1.19.2** table (ids 0-20). It is not the modern one: 1.20.5
@@ -242,6 +279,7 @@ pub enum MetadataValue<'a> {
     #[id(14)]
     Nbt(NbtTag<'a>),
     #[id(15)]
+    #[lua(validate = "validate_particle")]
     Particle {
         particle_id: VarInt,
         data: ParticleData<'a>,
