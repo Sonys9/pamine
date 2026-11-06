@@ -17,21 +17,19 @@ use pcore_gen::{Lua, LuaPacket};
 
 
 #[derive(Lua, LuaPacket, Debug, Clone)]
-pub struct AwardStatistics<'a> {
-    pub statistics: Vec<Statistic<'a>>,
+pub struct AwardStatistics {
+    pub statistics: Vec<Statistic>,
 }
 
 #[derive(Lua, LuaPacket, Debug, Clone)]
-pub struct Statistic<'a> {
+pub struct Statistic {
     pub category_id: VarInt,
     pub statistic_id: VarInt,
     pub value: VarInt,
-    #[lua(skip)]
-    _marker: std::marker::PhantomData<&'a ()>,
 }
 
-impl<'a> Decode<'a> for AwardStatistics<'a> {
-    fn decode(decoder: &mut Decoder<'a>) -> Result<Self, Error> {
+impl Decode<'_> for AwardStatistics {
+    fn decode(decoder: &mut Decoder<'_>) -> Result<Self, Error> {
         let count = decoder.varint()?.get();
         if count < 0 {
             return Err(Error::Nbt("negative statistic count"));
@@ -42,14 +40,13 @@ impl<'a> Decode<'a> for AwardStatistics<'a> {
                 category_id: decoder.varint()?,
                 statistic_id: decoder.varint()?,
                 value: decoder.varint()?,
-                _marker: std::marker::PhantomData,
             });
         }
         Ok(Self { statistics })
     }
 }
 
-impl Encode for Statistic<'_> {
+impl Encode for Statistic {
     fn encode(&self, encoder: &mut Encoder) {
         encoder.varint(self.category_id.get());
         encoder.varint(self.statistic_id.get());
@@ -57,7 +54,7 @@ impl Encode for Statistic<'_> {
     }
 }
 
-impl Encode for AwardStatistics<'_> {
+impl Encode for AwardStatistics {
     fn encode(&self, encoder: &mut Encoder) {
         encoder.varint(self.statistics.len() as i32);
         for statistic in &self.statistics {

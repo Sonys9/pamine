@@ -46,7 +46,7 @@ pub enum Play<'a> {
     #[id(0x03)]
     EntityAnimation(EntityAnimation),
     #[id(0x04)]
-    AwardStatistics(AwardStatistics<'a>),
+    AwardStatistics(AwardStatistics),
     #[id(0x05)]
     AcknowledgeBlockChange(AcknowledgeBlockChange),
     #[id(0x06)]
