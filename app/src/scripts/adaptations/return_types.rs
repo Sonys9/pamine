@@ -17,10 +17,11 @@
 use std::sync::atomic::Ordering;
 
 use mlua::{IntoLua, prelude::*};
+use pcore::lua::LuaPacketValue;
 
 use crate::{
     connections::{Injection, Update},
-    packets::UnsureThreshold,
+    packets::{UnsureThreshold, frame_packet},
 };
 
 /// The `update` global: a namespace of constructors for [`Update`] tables.
@@ -53,6 +54,19 @@ impl IntoLua for &UnsureThreshold {
         table.set("threshold", threshold)?;
         Ok(LuaValue::Table(table))
     }
+}
+
+/// Rebuilds an [`UnsureThreshold`] from the table a handler received.
+///
+/// The handler gets `opts.threshold` as `{ threshold = <int> | nil }`. Passing
+/// it back to `push_packet` lets the frame be built with the same compression
+/// state the connection is in, without the script having to know the number.
+fn threshold_from_lua(table: &LuaTable) -> LuaResult<UnsureThreshold> {
+    let threshold = UnsureThreshold::new();
+    if let Some(value) = table.get::<Option<i32>>("threshold")? {
+        threshold.set(value);
+    }
+    Ok(threshold)
 }
 
 /// `Injection` is a userdata, so `IntoLua` comes from mlua's blanket impl.
@@ -90,6 +104,21 @@ impl LuaUserData for Injection {
             this.bytes.extend_from_slice(&frame.as_bytes());
             Ok(())
         });
+
+        // The ergonomic path: a packet built by a `LuaPacket` constructor.
+        // `LuaPacketValue` carries the opcode separately, so it is written
+        // first and the whole body is framed with the live threshold.
+        methods.add_method_mut(
+            "push_packet",
+            |_, this, (packet, threshold): (LuaPacketValue, LuaTable)| {
+                let threshold = threshold_from_lua(&threshold)?;
+                let body = packet.into_body();
+                let framed = frame_packet(&body, &threshold)
+                    .map_err(|e| LuaError::runtime(format!("failed to frame packet: {e}")))?;
+                this.bytes.extend_from_slice(&framed);
+                Ok(())
+            },
+        );
 
         methods.add_method_mut("clear", |_, this, ()| {
             this.bytes.clear();
@@ -139,6 +168,23 @@ impl IntoLua for UpdateBindings {
         table.set(
             "injection",
             lua.create_function(|_, changeable: bool| Ok(Injection::empty(changeable)))?,
+        )?;
+
+        // The `Injection::from_packet` equivalent: build a one-packet
+        // injection in a single call, without the script having to create an
+        // empty injection and push into it.
+        table.set(
+            "packet",
+            lua.create_function(
+                |_, (packet, threshold, changeable): (LuaPacketValue, LuaTable, bool)| {
+                    let threshold = threshold_from_lua(&threshold)?;
+                    let body = packet.into_body();
+                    let framed = frame_packet(&body, &threshold).map_err(|e| {
+                        LuaError::runtime(format!("failed to frame packet: {e}"))
+                    })?;
+                    Ok(Injection::from_frame(framed, changeable))
+                },
+            )?,
         )?;
 
         Ok(LuaValue::Table(table))

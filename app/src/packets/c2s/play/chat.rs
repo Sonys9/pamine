@@ -14,6 +14,7 @@ use crate::packets::{counted, optional_bytes};
 /// Hand-written `Decode`: the profile id and signature are gated by `has_data`.
 use pcore_gen::Lua;
 
+
 #[derive(Lua, Debug, Clone)]
 pub struct MessageAcknowledgment<'a> {
     pub has_data: bool,

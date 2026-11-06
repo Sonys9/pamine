@@ -12,6 +12,7 @@ use crate::packets::{counted, identifiers};
 /// One advancement's progress.
 use pcore_gen::Lua;
 
+
 #[derive(Lua, Debug, Clone)]
 pub struct AdvancementProgress<'a> {
     pub id: &'a str,

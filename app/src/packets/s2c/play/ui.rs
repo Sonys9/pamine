@@ -10,6 +10,7 @@ use pcore::{
 /// The `action`-dependent body of [`BossBar`].
 use pcore_gen::Lua;
 
+
 #[derive(Lua, Debug, Clone)]
 pub enum BossBarAction<'a> {
     /// `0` — a new bar appears.

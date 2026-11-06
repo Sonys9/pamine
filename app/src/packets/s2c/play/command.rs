@@ -15,6 +15,7 @@ use crate::{
 /// One entry of a tab-completion response.
 use pcore_gen::Lua;
 
+
 #[derive(Lua, Debug, Clone)]
 pub struct SuggestionMatch<'a> {
     pub text: &'a str,

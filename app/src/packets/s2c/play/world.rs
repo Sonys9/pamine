@@ -12,6 +12,7 @@ use crate::packets::{counted, optional_chat};
 
 use pcore_gen::Lua;
 
+
 #[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct InitializeWorldBorder {
     pub x: f64,

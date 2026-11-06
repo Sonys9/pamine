@@ -9,6 +9,7 @@ use pcore::{
 
 use pcore_gen::Lua;
 
+
 #[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct PluginMessage<'a> {
     pub channel: &'a str,

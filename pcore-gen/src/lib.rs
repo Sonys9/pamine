@@ -21,6 +21,7 @@ mod decode_packet;
 mod encode;
 mod encode_packet;
 mod lua;
+mod lua_packet;
 
 use proc_macro::TokenStream;
 use syn::{DeriveInput, parse_macro_input};
@@ -138,6 +139,35 @@ pub fn derive_encode_packet(stream: TokenStream) -> TokenStream {
 pub fn derive_lua(stream: TokenStream) -> TokenStream {
     let input = parse_macro_input!(stream as DeriveInput);
     match lua::expand(&input) {
+        Ok(tokens) => tokens.into(),
+        Err(e) => e.to_compile_error().into(),
+    }
+}
+
+/// Proc macro derive for Lua packet constructors.
+///
+/// The inverse of [`Lua`]: instead of turning a packet into a table, it
+/// generates a constructor per variant so a script can *build* a packet.
+///
+/// ```lua
+/// local p = s2c.status.StatusResponse { json_response = "{}" }
+/// -- p.opcode == 0, p.body == <encoded fields>
+/// ```
+///
+/// Each constructor encodes its fields straight into bytes and returns a
+/// [`LuaPacketValue`](pcore::lua::LuaPacketValue) — opcode plus body, no
+/// framing. The caller frames it with the connection's compression threshold.
+///
+/// Encoding directly, rather than building the Rust struct, sidesteps the
+/// lifetime problem: most packet structs borrow from the decode buffer
+/// (`&'a str`, `&'a [u8]`), and a Lua string cannot be borrowed for that
+/// lifetime.
+///
+/// The generated `lua_bindings(lua)` returns a table keyed by variant name.
+#[proc_macro_derive(LuaPacket, attributes(id))]
+pub fn derive_lua_packet(stream: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(stream as DeriveInput);
+    match lua_packet::expand(&input) {
         Ok(tokens) => tokens.into(),
         Err(e) => e.to_compile_error().into(),
     }

@@ -11,6 +11,7 @@ use crate::packets::counted;
 
 use pcore_gen::Lua;
 
+
 #[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct ClientCommand {
     pub action_id: VarInt,

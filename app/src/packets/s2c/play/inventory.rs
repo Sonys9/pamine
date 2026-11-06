@@ -11,6 +11,7 @@ use crate::packets::{counted, identifiers};
 
 use pcore_gen::Lua;
 
+
 #[derive(Decode, Encode, Lua, Debug, Clone)]
 pub struct CloseContainer {
     pub window_id: u8,
