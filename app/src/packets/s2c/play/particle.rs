@@ -18,7 +18,7 @@ use pcore::{
 };
 
 /// The payload of a particle, keyed by its type id.
-use pcore_gen::Lua;
+use pcore_gen::{Lua, LuaPacket};
 
 
 #[derive(Lua, Debug, Clone)]
@@ -54,11 +54,14 @@ pub enum ParticleData<'a> {
 }
 
 /// The origin of a `vibration` particle.
-#[derive(Lua, Debug, Clone, Copy)]
+#[derive(Lua, LuaPacket, Debug, Clone, Copy)]
+#[lua(tag)]
 pub enum VibrationSource {
     /// `0` — a block position.
+    #[id(0)]
     Block(u64),
     /// `1` — an entity and its eye height.
+    #[id(1)]
     Entity { entity_id: VarInt, eye_height: f32 },
 }
 
@@ -169,5 +172,54 @@ pub fn write_particle_data(encoder: &mut Encoder, data: &ParticleData<'_>) {
         }
         ParticleData::SculkCharge { roll } => encoder.f32(*roll),
         ParticleData::Shriek { delay } => encoder.varint(delay.get()),
+    }
+}
+
+/// Hand-written: the variant is chosen by `type`, but the wire form has **no**
+/// leading id — the particle type id lives in the enclosing packet, and the
+/// payload is just the variant's fields. The derive cannot express that, so
+/// this impl writes the fields only.
+impl ParticleData<'_> {
+    pub fn lua_encode_table(
+        table: &mlua::Table,
+        encoder: &mut Encoder,
+    ) -> mlua::Result<()> {
+        let variant: String = table.get("type")?;
+        match variant.as_str() {
+            "None" => {}
+            "BlockState" => encoder.varint(table.get::<i32>("value")?),
+            "Dust" => {
+                encoder.f32(table.get::<f32>("red")?);
+                encoder.f32(table.get::<f32>("green")?);
+                encoder.f32(table.get::<f32>("blue")?);
+                encoder.f32(table.get::<f32>("scale")?);
+            }
+            "DustColorTransition" => {
+                for channel in table.get::<[f32; 3]>("from")? {
+                    encoder.f32(channel);
+                }
+                encoder.f32(table.get::<f32>("scale")?);
+                for channel in table.get::<[f32; 3]>("to")? {
+                    encoder.f32(channel);
+                }
+            }
+            "Item" => {
+                let slot: pcore::lua::OwnedSlot = table.get("value")?;
+                encoder.slot(&slot.as_borrowed());
+            }
+            "Vibration" => {
+                let source: mlua::Table = table.get("source")?;
+                VibrationSource::lua_encode_table(&source, encoder)?;
+                encoder.varint(table.get::<i32>("ticks")?);
+            }
+            "SculkCharge" => encoder.f32(table.get::<f32>("roll")?),
+            "Shriek" => encoder.varint(table.get::<i32>("delay")?),
+            other => {
+                return Err(mlua::Error::runtime(format!(
+                    "unknown variant {other:?} for ParticleData"
+                )));
+            }
+        }
+        Ok(())
     }
 }

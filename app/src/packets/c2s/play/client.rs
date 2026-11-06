@@ -9,15 +9,15 @@ use pcore::{
 
 use crate::packets::counted;
 
-use pcore_gen::Lua;
+use pcore_gen::{Lua, LuaPacket};
 
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct ClientCommand {
     pub action_id: VarInt,
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct ClientInformation<'a> {
     pub locale: &'a str,
     pub view_distance: i8,
@@ -29,50 +29,50 @@ pub struct ClientInformation<'a> {
     pub allow_server_listings: bool,
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct CommandSuggestionsRequest<'a> {
     pub transaction_id: VarInt,
     pub text: &'a str,
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct PlayerAbilities {
     pub flags: u8,
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct PlayerInput {
     pub sideways: f32,
     pub forward: f32,
     pub flags: u8,
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct ResourcePackResponse {
     pub result: VarInt,
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct KeepAlive {
     pub keep_alive_id: i64,
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct Pong {
     pub id: i32,
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct ChangeDifficulty {
     pub difficulty: u8,
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct LockDifficulty {
     pub locked: bool,
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct PluginMessage<'a> {
     pub channel: &'a str,
     /// The payload has no length prefix: its length is whatever remains in the
@@ -81,7 +81,7 @@ pub struct PluginMessage<'a> {
     pub data: &'a [u8],
 }
 
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct EditBook<'a> {
     pub slot: VarInt,
     pub pages: Vec<&'a str>,

@@ -26,9 +26,15 @@ fn packet_bindings(lua: &Lua, side: Side) -> LuaResult<LuaTable> {
     let table = lua.create_table()?;
     match side {
         Side::S2C => {
+            table.set("handshake", s2c::handshake::Handshake::lua_bindings(lua)?)?;
+            table.set("login", s2c::login::Login::lua_bindings(lua)?)?;
+            table.set("play", s2c::play::Play::lua_bindings(lua)?)?;
             table.set("status", s2c::status::Status::lua_bindings(lua)?)?;
         }
         Side::C2S => {
+            table.set("handshake", c2s::handshake::Handshake::lua_bindings(lua)?)?;
+            table.set("login", c2s::login::Login::lua_bindings(lua)?)?;
+            table.set("play", c2s::play::Play::lua_bindings(lua)?)?;
             table.set("status", c2s::status::Status::lua_bindings(lua)?)?;
         }
     }

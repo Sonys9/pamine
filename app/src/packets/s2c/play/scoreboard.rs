@@ -7,10 +7,10 @@ use pcore::{
     errors::Error,
 };
 
-use pcore_gen::Lua;
+use pcore_gen::{Lua, LuaPacket};
 
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct DisplayObjective<'a> {
     pub position: u8,
     pub score_name: &'a str,
@@ -20,7 +20,7 @@ pub struct DisplayObjective<'a> {
 ///
 /// Hand-written `Decode`: `objective_value` and `kind` are present for modes 0
 /// (create) and 2 (update text), not gated by their own booleans.
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct UpdateObjectives<'a> {
     pub objective_name: &'a str,
     pub mode: u8,
@@ -59,9 +59,11 @@ impl Encode for UpdateObjectives<'_> {
 }
 
 /// The `mode`-dependent body of [`UpdateTeams`].
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
+#[lua(tag)]
 pub enum TeamAction<'a> {
     /// `0` — a new team is created.
+    #[id(0)]
     Create {
         display_name: &'a str,
         friendly_flags: u8,
@@ -73,8 +75,10 @@ pub enum TeamAction<'a> {
         entities: Vec<&'a str>,
     },
     /// `1` — the team is removed; nothing follows.
+    #[id(1)]
     Remove,
     /// `2` — only the display metadata changed.
+    #[id(2)]
     Update {
         display_name: &'a str,
         friendly_flags: u8,
@@ -85,12 +89,14 @@ pub enum TeamAction<'a> {
         suffix: &'a str,
     },
     /// `3` — entities joined the team.
+    #[id(3)]
     AddEntities { entities: Vec<&'a str> },
     /// `4` — entities left the team.
+    #[id(4)]
     RemoveEntities { entities: Vec<&'a str> },
 }
 
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct UpdateTeams<'a> {
     pub team_name: &'a str,
     pub action: TeamAction<'a>,
@@ -217,7 +223,7 @@ impl Encode for UpdateTeams<'_> {
 ///
 /// Hand-written `Decode`: `value` is present for every action except 1
 /// (remove), not gated by its own boolean.
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct UpdateScore<'a> {
     pub entity_name: &'a str,
     /// 0 = create/update, 1 = remove.

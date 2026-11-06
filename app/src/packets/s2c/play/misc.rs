@@ -7,10 +7,10 @@ use pcore::{
     errors::Error,
 };
 
-use pcore_gen::Lua;
+use pcore_gen::{Lua, LuaPacket};
 
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct PluginMessage<'a> {
     pub channel: &'a str,
     /// Everything after the channel: the payload has no length prefix, its
@@ -20,12 +20,12 @@ pub struct PluginMessage<'a> {
     pub data: &'a [u8],
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct Ping {
     pub id: i32,
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct KeepAlive {
     pub keep_alive_id: i64,
 }
@@ -34,7 +34,7 @@ pub struct KeepAlive {
 ///
 /// Hand-written `Decode`: `motd` and `icon` are gated by their own booleans,
 /// which `Option<T>` would consume a second time.
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct ServerData<'a> {
     pub has_motd: bool,
     pub motd: Option<&'a str>,
@@ -90,7 +90,7 @@ impl Encode for ServerData<'_> {
 /// `Resource Pack` (0x3D).
 ///
 /// Hand-written `Decode`: `prompt_message` is gated by `has_prompt_message`.
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct ResourcePack<'a> {
     pub url: &'a str,
     /// 40-character lowercase hex SHA-1, or an arbitrary unique id.
@@ -133,7 +133,7 @@ impl Encode for ResourcePack<'_> {
     }
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct TagQueryResponse<'a> {
     pub transaction_id: VarInt,
     pub nbt: NbtTag<'a>,

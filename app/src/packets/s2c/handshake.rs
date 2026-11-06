@@ -7,7 +7,7 @@
 //! so the generated `match self {}` would not compile. There is nothing to
 //! encode anyway.
 
-use pcore_gen::{DecodePacket, Lua};
+use pcore_gen::{DecodePacket, Lua, LuaPacket};
 
-#[derive(DecodePacket, Lua, Clone, Debug)]
+#[derive(DecodePacket, Lua, LuaPacket, Clone, Debug)]
 pub enum Handshake {}

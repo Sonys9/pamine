@@ -10,10 +10,10 @@ use pcore::{
 use crate::packets::{counted, identifiers};
 
 /// One advancement's progress.
-use pcore_gen::Lua;
+use pcore_gen::{Lua, LuaPacket};
 
 
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct AdvancementProgress<'a> {
     pub id: &'a str,
     /// `None` when the advancement has no parent.
@@ -28,7 +28,7 @@ pub struct AdvancementProgress<'a> {
 }
 
 /// The display block of an advancement.
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct AdvancementDisplay<'a> {
     pub title: &'a str,
     pub description: &'a str,
@@ -44,7 +44,7 @@ pub struct AdvancementDisplay<'a> {
 }
 
 /// One criterion of an advancement and whether it has been achieved.
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct CriterionProgress<'a> {
     pub id: &'a str,
     /// `None` when the criterion has not been achieved.
@@ -52,7 +52,7 @@ pub struct CriterionProgress<'a> {
 }
 
 /// A progress-only update: the advancement id plus its criteria states.
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct AdvancementProgressUpdate<'a> {
     pub id: &'a str,
     pub criteria: Vec<CriterionProgress<'a>>,
@@ -63,7 +63,7 @@ pub struct AdvancementProgressUpdate<'a> {
 /// Hand-written `Decode`: the advancement body is a chain of gated sections
 /// (parent, display, criteria, requirements) and the progress entries carry a
 /// per-criterion `achieved` gate.
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct UpdateAdvancements<'a> {
     pub reset: bool,
     pub added: Vec<AdvancementProgress<'a>>,
@@ -217,7 +217,7 @@ impl Encode for UpdateAdvancements<'_> {
     }
 }
 
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct SelectAdvancementsTab<'a> {
     pub has_id: bool,
     pub tab_id: Option<&'a str>,
@@ -245,7 +245,7 @@ impl Encode for SelectAdvancementsTab<'_> {
 }
 
 /// One ingredient of a recipe: any of `items` may be used.
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct Ingredient<'a> {
     pub items: Vec<Slot<'a>>,
 }
@@ -308,8 +308,76 @@ pub enum RecipeData<'a> {
     Special,
 }
 
+/// Hand-written: the variant is chosen by the recipe **type string**
+/// (`minecraft:crafting_shaped`), not by a numeric id, and the wire form has no
+/// leading tag — the type string lives in the enclosing [`Recipe`]. The derive
+/// cannot express that, so this impl writes the fields only.
+impl RecipeData<'_> {
+    pub fn lua_encode_table(
+        table: &mlua::Table,
+        encoder: &mut Encoder,
+    ) -> mlua::Result<()> {
+        let variant: String = table.get("type")?;
+        match variant.as_str() {
+            "Shapeless" => {
+                encoder.string(&table.get::<String>("group")?);
+                let ingredients: Vec<mlua::Table> = table.get("ingredients")?;
+                encoder.varint(ingredients.len() as i32);
+                for item in ingredients {
+                    Ingredient::lua_encode_table(&item, encoder)?;
+                }
+                let result: pcore::lua::OwnedSlot = table.get("result")?;
+                encoder.slot(&result.as_borrowed());
+            }
+            "Shaped" => {
+                encoder.varint(table.get::<i32>("width")?);
+                encoder.varint(table.get::<i32>("height")?);
+                encoder.string(&table.get::<String>("group")?);
+                let ingredients: Vec<mlua::Table> = table.get("ingredients")?;
+                encoder.varint(ingredients.len() as i32);
+                for item in ingredients {
+                    Ingredient::lua_encode_table(&item, encoder)?;
+                }
+                let result: pcore::lua::OwnedSlot = table.get("result")?;
+                encoder.slot(&result.as_borrowed());
+            }
+            "Cooking" => {
+                encoder.string(&table.get::<String>("group")?);
+                let ingredient: mlua::Table = table.get("ingredient")?;
+                Ingredient::lua_encode_table(&ingredient, encoder)?;
+                let result: pcore::lua::OwnedSlot = table.get("result")?;
+                encoder.slot(&result.as_borrowed());
+                encoder.f32(table.get::<f32>("experience")?);
+                encoder.varint(table.get::<i32>("cooking_time")?);
+            }
+            "Stonecutting" => {
+                encoder.string(&table.get::<String>("group")?);
+                let ingredient: mlua::Table = table.get("ingredient")?;
+                Ingredient::lua_encode_table(&ingredient, encoder)?;
+                let result: pcore::lua::OwnedSlot = table.get("result")?;
+                encoder.slot(&result.as_borrowed());
+            }
+            "Smithing" => {
+                let base: mlua::Table = table.get("base")?;
+                Ingredient::lua_encode_table(&base, encoder)?;
+                let addition: mlua::Table = table.get("addition")?;
+                Ingredient::lua_encode_table(&addition, encoder)?;
+                let result: pcore::lua::OwnedSlot = table.get("result")?;
+                encoder.slot(&result.as_borrowed());
+            }
+            "Special" => {}
+            other => {
+                return Err(mlua::Error::runtime(format!(
+                    "unknown variant {other:?} for RecipeData"
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
 /// One recipe: a type, an identifier and a type-dependent body.
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct Recipe<'a> {
     /// The recipe type identifier, e.g. `minecraft:crafting_shaped`.
     pub kind: &'a str,
@@ -322,7 +390,7 @@ pub struct Recipe<'a> {
 /// Hand-written `Decode`: the wire order is **type first, then id**, and the
 /// body that follows has no length prefix, so it can only be delimited by
 /// knowing the layout of every recipe type.
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct UpdateRecipes<'a> {
     pub recipes: Vec<Recipe<'a>>,
 }
@@ -482,20 +550,20 @@ fn recipe_data<'a>(decoder: &mut Decoder<'a>, kind: &str) -> Result<RecipeData<'
 }
 
 /// One named tag group: an identifier and the entries it contains.
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct TagGroup<'a> {
     pub name: &'a str,
     pub entries: Vec<VarInt>,
 }
 
 /// All tag groups of one registry type.
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct TagRegistry<'a> {
     pub registry: &'a str,
     pub tags: Vec<TagGroup<'a>>,
 }
 
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct UpdateTags<'a> {
     pub registries: Vec<TagRegistry<'a>>,
 }

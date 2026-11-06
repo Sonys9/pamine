@@ -6,9 +6,9 @@ use pcore::{
     encoder::Encoder,
     errors::Error,
 };
-use pcore_gen::{DecodePacket, EncodePacket, Lua};
+use pcore_gen::{DecodePacket, EncodePacket, Lua, LuaPacket};
 
-#[derive(DecodePacket, EncodePacket, Lua, Clone, Debug)]
+#[derive(DecodePacket, EncodePacket, Lua, LuaPacket, Clone, Debug)]
 pub enum Login<'a> {
     #[id(0x00)]
     Disconnect(Disconnect<'a>),
@@ -22,12 +22,12 @@ pub enum Login<'a> {
     LoginPluginRequest(LoginPluginRequest<'a>),
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct Disconnect<'a> {
     pub reason: &'a str,
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct EncryptionRequest<'a> {
     pub server_id: &'a str,
     pub public_key: &'a [u8],
@@ -38,7 +38,7 @@ pub struct EncryptionRequest<'a> {
 ///
 /// `String (32767)` in the wiki is a protocol String — VarInt length plus a
 /// maximum character count — not the NBT `u16` framing.
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct Property<'a> {
     pub name: &'a str,
     pub value: &'a str,
@@ -81,7 +81,7 @@ impl Encode for Property<'_> {
 ///
 /// Kept as its own type so the count and the elements are read in one place,
 /// with the same `MAX_ELEMENTS` guard the other counted arrays use.
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct Properties<'a> {
     pub entries: Vec<Property<'a>>,
 }
@@ -115,7 +115,7 @@ impl Encode for Properties<'_> {
     }
 }
 
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct LoginSuccess<'a> {
     pub uuid: Uuid,
     pub username: &'a str,
@@ -143,7 +143,7 @@ impl Encode for LoginSuccess<'_> {
     }
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct SetCompression {
     pub threshold: VarInt,
 }
@@ -152,7 +152,7 @@ pub struct SetCompression {
 ///
 /// The payload has no length prefix: the wiki states its length "must be
 /// inferred from the packet length", so it is read as the rest of the buffer.
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct LoginPluginRequest<'a> {
     pub message_id: VarInt,
     pub channel: &'a str,

@@ -6,10 +6,10 @@ use pcore::{
     encoder::Encoder,
     errors::Error,
 };
-use pcore_gen::Lua;
+use pcore_gen::{Lua, LuaPacket};
 
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct QueryEntityTag {
     pub transaction_id: VarInt,
     pub entity_id: VarInt,
@@ -19,7 +19,7 @@ pub struct QueryEntityTag {
 ///
 /// Hand-written `Decode`: the target coordinates are only present for
 /// `type == 2` (interact at), and `hand` only for `type == 0` or `2`.
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct Interact {
     pub entity_id: VarInt,
     /// 0 = interact, 1 = attack, 2 = interact at.
@@ -90,41 +90,41 @@ impl Encode for Interact {
     }
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct SwingArm {
     pub hand: VarInt,
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct TeleportToEntity {
     pub target: Uuid,
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct PickItem {
     pub slot: VarInt,
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct PlaceRecipe<'a> {
     pub window_id: i8,
     pub recipe: &'a str,
     pub make_all: bool,
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct ChangeRecipeBookSettings {
     pub book_id: VarInt,
     pub book_open: bool,
     pub filter_active: bool,
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct SetSeenRecipe<'a> {
     pub recipe_id: &'a str,
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct RenameItem<'a> {
     pub item_name: &'a str,
 }
@@ -133,7 +133,7 @@ pub struct RenameItem<'a> {
 ///
 /// Hand-written `Decode`: `tab_id` is only present for `action == 0`
 /// (opened tab).
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct SeenAdvancements<'a> {
     /// 0 = opened tab, 1 = closed screen.
     pub action: VarInt,
@@ -161,7 +161,7 @@ impl Encode for SeenAdvancements<'_> {
     }
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct SelectTrade {
     pub selected_slot: VarInt,
 }
@@ -170,7 +170,7 @@ pub struct SelectTrade {
 ///
 /// Hand-written `Decode`: each effect is gated by its own boolean, which
 /// `Option<VarInt>` would consume a second time.
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct SetBeaconEffect {
     pub has_primary_effect: bool,
     pub primary_effect: Option<VarInt>,
@@ -214,7 +214,7 @@ impl Encode for SetBeaconEffect {
     }
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct SetHeldItem {
     pub slot: i16,
 }

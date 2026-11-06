@@ -9,15 +9,15 @@ use pcore::{
 
 use crate::packets::{counted, identifiers};
 
-use pcore_gen::Lua;
+use pcore_gen::{Lua, LuaPacket};
 
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct CloseContainer {
     pub window_id: u8,
 }
 
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct SetContainerContent<'a> {
     pub window_id: u8,
     pub state_id: VarInt,
@@ -64,14 +64,14 @@ impl Encode for SetContainerContent<'_> {
     }
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct SetContainerProperty {
     pub window_id: u8,
     pub property: i16,
     pub value: i16,
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct SetContainerSlot<'a> {
     pub window_id: i8,
     pub state_id: VarInt,
@@ -80,44 +80,44 @@ pub struct SetContainerSlot<'a> {
     pub slot_data: Slot<'a>,
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct SetCooldown {
     pub item_id: VarInt,
     pub cooldown_ticks: VarInt,
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct OpenHorseScreen {
     pub window_id: u8,
     pub slot_count: VarInt,
     pub entity_id: i32,
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct OpenBook {
     pub hand: VarInt,
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct OpenScreen<'a> {
     pub window_id: VarInt,
     pub window_type: VarInt,
     pub window_title: &'a str,
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct PlaceGhostRecipe<'a> {
     pub window_id: u8,
     pub recipe: &'a str,
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct SetHeldItem {
     pub slot: u8,
 }
 
 /// One trade offered by a villager.
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct TradeOffer<'a> {
     pub input_item_1: Slot<'a>,
     pub output_item: Slot<'a>,
@@ -137,7 +137,7 @@ pub struct TradeOffer<'a> {
 /// Hand-written `Decode`: the second input slot is gated by a boolean, and the
 /// packet ends with four villager-level fields that belong to the window rather
 /// than to a single trade.
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct MerchantOffers<'a> {
     pub window_id: VarInt,
     pub trades: Vec<TradeOffer<'a>>,
@@ -225,7 +225,7 @@ impl Encode for MerchantOffers<'_> {
     }
 }
 
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct UpdateRecipeBook<'a> {
     pub action: VarInt,
     pub crafting_book_open: bool,

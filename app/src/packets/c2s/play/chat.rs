@@ -12,10 +12,10 @@ use crate::packets::{counted, optional_bytes};
 /// `Message Acknowledgment` (0x03).
 ///
 /// Hand-written `Decode`: the profile id and signature are gated by `has_data`.
-use pcore_gen::Lua;
+use pcore_gen::{Lua, LuaPacket};
 
 
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct MessageAcknowledgment<'a> {
     pub has_data: bool,
     pub profile_id: Option<Uuid>,
@@ -50,7 +50,7 @@ impl Encode for MessageAcknowledgment<'_> {
 }
 
 /// One `(argument name, signature)` pair of a signed chat command.
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct ArgumentSignature<'a> {
     pub name: &'a str,
     pub signature: &'a [u8],
@@ -75,7 +75,7 @@ impl Encode for ArgumentSignature<'_> {
 /// does not document it, and a wrong guess would desynchronise the stream just
 /// as badly. `Decoder::rest` captures whatever the client sent, so a round trip
 /// is byte-exact.
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct ChatCommand<'a> {
     pub command: &'a str,
     pub timestamp: i64,
@@ -124,7 +124,7 @@ impl Encode for ChatCommand<'_> {
 }
 
 /// A previously seen chat message: its sender and signature.
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct LastSeenMessage<'a> {
     pub sender: Uuid,
     pub signature: &'a [u8],
@@ -141,7 +141,7 @@ impl Encode for LastSeenMessage<'_> {
 ///
 /// Hand-written `Decode`: the signature is length-prefixed (empty means
 /// absent), and the "last received" entry is gated by a boolean.
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct ChatMessage<'a> {
     pub message: &'a str,
     pub timestamp: i64,
@@ -205,7 +205,7 @@ impl Encode for ChatMessage<'_> {
     }
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct ChatPreview<'a> {
     pub query: i32,
     pub message: &'a str,

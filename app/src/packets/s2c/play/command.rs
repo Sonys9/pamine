@@ -13,17 +13,17 @@ use crate::{
 };
 
 /// One entry of a tab-completion response.
-use pcore_gen::Lua;
+use pcore_gen::{Lua, LuaPacket};
 
 
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct SuggestionMatch<'a> {
     pub text: &'a str,
     /// The tooltip is a `bool`-gated chat component.
     pub tooltip: Option<&'a str>,
 }
 
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct CommandSuggestionsResponse<'a> {
     pub id: VarInt,
     pub start: VarInt,
@@ -75,7 +75,7 @@ impl Encode for CommandSuggestionsResponse<'_> {
 
 /// The command graph. `nodes` is a VarInt **count** of variable-length node
 /// structures, so it has to be parsed element by element.
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct Commands<'a> {
     pub nodes: Vec<CommandNode<'a>>,
     pub root_index: VarInt,
@@ -116,11 +116,93 @@ pub enum CommandParser<'a> {
     Resource { registry: &'a str },
 }
 
+/// Hand-written: the variant is chosen by the parser **id string**
+/// (`brigadier:double`), not by a numeric tag, and the wire form has no leading
+/// id — the parser id lives in the enclosing [`CommandNode`]. The derive cannot
+/// express that, so this impl writes the properties only.
+impl CommandParser<'_> {
+    pub fn lua_encode_table(
+        table: &mlua::Table,
+        encoder: &mut Encoder,
+    ) -> mlua::Result<()> {
+        let variant: String = table.get("type")?;
+        match variant.as_str() {
+            "None" => {}
+            "Double" => {
+                write_optional_f64(encoder, table.get("min")?);
+                write_optional_f64(encoder, table.get("max")?);
+            }
+            "Float" => {
+                write_optional_f32(encoder, table.get("min")?);
+                write_optional_f32(encoder, table.get("max")?);
+            }
+            "Integer" => {
+                write_optional_i32(encoder, table.get("min")?);
+                write_optional_i32(encoder, table.get("max")?);
+            }
+            "Long" => {
+                write_optional_i64(encoder, table.get("min")?);
+                write_optional_i64(encoder, table.get("max")?);
+            }
+            "String" => encoder.varint(table.get::<i32>("behavior")?),
+            "Entity" => encoder.u8(table.get::<u8>("flags")?),
+            "ScoreHolder" => encoder.u8(table.get::<u8>("flags")?),
+            "Resource" => encoder.string(&table.get::<String>("registry")?),
+            other => {
+                return Err(mlua::Error::runtime(format!(
+                    "unknown variant {other:?} for CommandParser"
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
+fn write_optional_f64(encoder: &mut Encoder, value: Option<f64>) {
+    match value {
+        Some(v) => {
+            encoder.bool(true);
+            encoder.f64(v);
+        }
+        None => encoder.bool(false),
+    }
+}
+
+fn write_optional_f32(encoder: &mut Encoder, value: Option<f32>) {
+    match value {
+        Some(v) => {
+            encoder.bool(true);
+            encoder.f32(v);
+        }
+        None => encoder.bool(false),
+    }
+}
+
+fn write_optional_i32(encoder: &mut Encoder, value: Option<i32>) {
+    match value {
+        Some(v) => {
+            encoder.bool(true);
+            encoder.i32(v);
+        }
+        None => encoder.bool(false),
+    }
+}
+
+fn write_optional_i64(encoder: &mut Encoder, value: Option<i64>) {
+    match value {
+        Some(v) => {
+            encoder.bool(true);
+            encoder.i64(v);
+        }
+        None => encoder.bool(false),
+    }
+}
+
 /// One node of the command graph.
 ///
 /// `flags` bit 0x03 selects the node type, 0x04 marks an executable node,
 /// 0x08 a redirect, 0x10 a suggestions type and 0x20 a restricted node.
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct CommandNode<'a> {
     pub flags: u8,
     pub children: Vec<VarInt>,

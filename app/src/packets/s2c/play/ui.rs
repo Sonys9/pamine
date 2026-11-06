@@ -8,12 +8,14 @@ use pcore::{
 };
 
 /// The `action`-dependent body of [`BossBar`].
-use pcore_gen::Lua;
+use pcore_gen::{Lua, LuaPacket};
 
 
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
+#[lua(tag)]
 pub enum BossBarAction<'a> {
     /// `0` — a new bar appears.
+    #[id(0)]
     Add {
         title: &'a str,
         health: f32,
@@ -22,18 +24,23 @@ pub enum BossBarAction<'a> {
         flags: u8,
     },
     /// `1` — the bar disappears; nothing follows.
+    #[id(1)]
     Remove,
     /// `2` — only the health changed.
+    #[id(2)]
     UpdateHealth { health: f32 },
     /// `3` — only the title changed.
+    #[id(3)]
     UpdateTitle { title: &'a str },
     /// `4` — only the colour and division changed.
+    #[id(4)]
     UpdateStyle { color: VarInt, division: VarInt },
     /// `5` — only the flags changed.
+    #[id(5)]
     UpdateFlags { flags: u8 },
 }
 
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct BossBar<'a> {
     pub uuid: Uuid,
     pub action: BossBarAction<'a>,
@@ -116,27 +123,27 @@ impl Encode for BossBar<'_> {
     }
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct ClearTitles {
     pub reset: bool,
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct SetActionBarText<'a> {
     pub action_bar_text: &'a str,
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct SetSubtitleText<'a> {
     pub subtitle_text: &'a str,
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct SetTitleText<'a> {
     pub title_text: &'a str,
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct SetTitleAnimationTimes {
     pub fade_in: i32,
     pub stay: i32,

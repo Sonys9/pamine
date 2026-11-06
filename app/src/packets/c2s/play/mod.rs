@@ -18,9 +18,9 @@ pub use container::*;
 pub use misc::*;
 pub use movement::*;
 
-use pcore_gen::{DecodePacket, EncodePacket, Lua};
+use pcore_gen::{DecodePacket, EncodePacket, Lua, LuaPacket};
 
-#[derive(DecodePacket, EncodePacket, Lua, Clone, Debug)]
+#[derive(DecodePacket, EncodePacket, Lua, LuaPacket, Clone, Debug)]
 pub enum Play<'a> {
     #[id(0x00)]
     ConfirmTeleportation(ConfirmTeleportation),

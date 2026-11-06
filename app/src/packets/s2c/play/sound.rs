@@ -7,10 +7,10 @@ use pcore::{
     errors::Error,
 };
 
-use pcore_gen::Lua;
+use pcore_gen::{Lua, LuaPacket};
 
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct CustomSoundEffect<'a> {
     pub sound_name: &'a str,
     pub sound_category: VarInt,
@@ -23,7 +23,7 @@ pub struct CustomSoundEffect<'a> {
 }
 
 /// `Entity Sound Effect` (0x5F). Unlike [`SoundEffect`] it carries no seed.
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct EntitySoundEffect {
     pub sound_id: VarInt,
     pub sound_category: VarInt,
@@ -32,7 +32,7 @@ pub struct EntitySoundEffect {
     pub pitch: f32,
 }
 
-#[derive(Decode, Encode, Lua, Debug, Clone)]
+#[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct SoundEffect {
     pub sound_id: VarInt,
     pub sound_category: VarInt,
@@ -48,7 +48,7 @@ pub struct SoundEffect {
 ///
 /// Hand-written `Decode`: `source` is gated by bit 0x1 of `flags` and `sound`
 /// by bit 0x2, not by per-field booleans.
-#[derive(Lua, Debug, Clone)]
+#[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct StopSound<'a> {
     pub flags: u8,
     pub source: Option<VarInt>,
