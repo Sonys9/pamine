@@ -1,4 +1,4 @@
-mod adaptations;
+pub mod adaptations;
 pub mod engine;
 
 use std::convert::Infallible;

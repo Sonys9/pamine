@@ -6,7 +6,10 @@ use tokio::sync::Mutex;
 use crate::{
     connections::Update,
     packets::UnsureThreshold,
-    scripts::{OwnType, adaptations::UpdateBindings},
+    scripts::{
+        OwnType,
+        adaptations::{NbtBindings, UpdateBindings},
+    },
 };
 
 // Cheap to copy because Lua is Arc + bool
@@ -37,6 +40,7 @@ impl Engine {
         self.lua.globals().set("sleep", sleep_binding)?;
         self.lua.globals().set("engine", self.clone())?;
         self.lua.globals().set("update", UpdateBindings)?;
+        self.lua.globals().set("nbt", NbtBindings)?;
 
         Ok(())
     }
