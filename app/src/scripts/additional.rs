@@ -24,7 +24,9 @@ impl Engine {
     pub fn add_print(&self) -> LuaResult<()> {
         let script = self.script.clone();
         let print_binding = self.lua.create_function(move |_, text: String| {
-            info!("[{} ({})] {}", script.name, script.uuid, text);
+            // Tracing automaticly fixes colors in terminal for Windows so
+            // It doesn't requires a manual fix
+            println!("\x1b[2;90m{} \x1b[0;32m{}\x1b[0m: {}", script.uuid, script.name, text);
             Ok(())
         })?;
 
