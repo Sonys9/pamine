@@ -15,6 +15,9 @@ pcore-gen = { path = "../pcore-gen" }
 socket2 = { version = "0.6.5", features = ["all"] }
 flate2 = "1.1.10"
 mlua = { version = "0.12.2", features = ["luajit", "async", "serialize", "send"] }
+tar = "0.4.46"
+toml = "1.2.1"
+uuid = { version = "1.29.0", features = ["v4"] }
 
 [build-dependencies]
 # Used by build.rs to turn data/blocks.json & registries.json into static tables.

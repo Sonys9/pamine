@@ -1,18 +1,16 @@
 use std::{sync::Arc, time::Duration};
 
 use mlua::{Function, StdLib, prelude::*};
+use pcore::decoder::Uuid;
 use tokio::sync::Mutex;
 
 use crate::{
-    connections::Update,
-    packets::{
+    connections::Update, packets::{
         Packet, Side, UnsureThreshold,
         c2s::{self, packets::C2SPacket},
         s2c::{self, packets::S2CPacket},
-    },
-    scripts::{
-        OwnType,
-        adaptations::{NbtBindings, UpdateBindings},
+    }, scripts::{
+        OwnType, Script, adaptations::{NbtBindings, UpdateBindings}, additional::{print, sleep},
     },
 };
 
@@ -46,32 +44,32 @@ fn packet_bindings(lua: &Lua, side: Side) -> LuaResult<LuaTable> {
 pub struct Engine {
     handlers: Arc<Mutex<[Option<(LuaRegistryKey, OwnType)>; 256]>>,
     lua: Lua,
+    script: Arc<Script>, // because Script is heavy
 }
 
 impl Engine {
-    pub fn new() -> LuaResult<Self> {
-        let lua = Lua::new_with(StdLib::ALL_SAFE | StdLib::JIT, LuaOptions::default())?;
+    pub fn new(script: Arc<Script>) -> LuaResult<Self> {
+        let lua = Lua::new_with(
+            StdLib::BIT | StdLib::MATH | StdLib::STRING | StdLib::TABLE,
+            LuaOptions::default()
+        )?;
 
         Ok(Self {
             handlers: Arc::new(Mutex::new([const { None }; 256])),
             lua,
+            script
         })
     }
 
     pub fn set_globals(&self) -> LuaResult<()> {
-        let sleep_binding = self
-            .lua
-            .create_async_function(|_, millis: u64| async move {
-                tokio::time::sleep(Duration::from_millis(millis)).await;
-                Ok(())
-            })?;
-
-        self.lua.globals().set("sleep", sleep_binding)?;
         self.lua.globals().set("engine", self.clone())?;
         self.lua.globals().set("update", UpdateBindings)?;
         self.lua.globals().set("nbt", NbtBindings)?;
         self.lua.globals().set("s2c", packet_bindings(&self.lua, Side::S2C)?)?;
         self.lua.globals().set("c2s", packet_bindings(&self.lua, Side::C2S)?)?;
+
+        sleep(&self.lua)?;
+        print(&self.lua)?;
 
         Ok(())
     }

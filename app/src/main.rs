@@ -7,7 +7,7 @@ use crate::{
     connections::Connector, packets::{
         Packet, UnsureThreshold,
         c2s::{self, packets::C2SPacket},
-    }, scripts::{Engine, HandlerOptions, OwnType},
+    }, scripts::{Engine, HandlerOptions, OwnType, Script},
 };
 
 mod buffer;
@@ -61,13 +61,14 @@ async fn main() {
 }
 
 async fn scripting_stuff() {
-    let engine = Engine::new().unwrap();
+    let script = Script::parse(include_bytes!("scripts/test_script.tar").to_vec()).unwrap();
+    let engine = Engine::new(Arc::new(script)).unwrap();
     engine.set_globals().unwrap();
     tokio::spawn({
-        let engine = engine.clone(); // Doesn't really cost anything because that's an Arc<...>
+        let engine = engine.clone(); // Doesn't really cost anything since that's an Arc<...>
         async move {
             engine
-                .run(include_str!("scripts/test_script.lua"))
+                .run("")
                 .await
                 .unwrap();
         }

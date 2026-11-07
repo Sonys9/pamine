@@ -1,0 +1,6 @@
+[script]
+name = "Test script"
+engine_version = 1
+description = "Just a test script"
+uuid = "dafe77bb-e1d5-4560-b473-288676192212"
+main_file = "test_script.lua"
