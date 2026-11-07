@@ -7,7 +7,7 @@ use crate::{
     connections::Connector, packets::{
         Packet, UnsureThreshold,
         c2s::{self, packets::C2SPacket},
-    }, scripts::{Engine, HandlerOptions, OwnType, Script},
+    }, scripts::{Engine, engine::HandlerOptions, OwnType, Script},
 };
 
 mod buffer;
@@ -62,13 +62,14 @@ async fn main() {
 
 async fn scripting_stuff() {
     let script = Script::parse(include_bytes!("scripts/test_script.tar").to_vec()).unwrap();
+    let code = script.main_code().unwrap().to_owned();
     let engine = Engine::new(Arc::new(script)).unwrap();
     engine.set_globals().unwrap();
     tokio::spawn({
         let engine = engine.clone(); // Doesn't really cost anything since that's an Arc<...>
         async move {
             engine
-                .run("")
+                .run(&code)
                 .await
                 .unwrap();
         }
@@ -82,13 +83,12 @@ async fn scripting_stuff() {
     let result_packet_0 = engine
         .on_packet(0, HandlerOptions::new(&packet, &threshold, true), OwnType::ReadInject)
         .await
-        .unwrap()
         .unwrap();
     info!("Result with packet 0: {:?}", result_packet_0);
+    // The test script only registers packet 0, so this one has no handler.
     let result_packet_1 = engine
         .on_packet(1, HandlerOptions::new(&packet, &threshold, false), OwnType::ReadWrite)
         .await
-        .unwrap()
         .unwrap();
     info!("Result with packet 1: {:?}", result_packet_1);
 
