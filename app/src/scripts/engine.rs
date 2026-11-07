@@ -8,7 +8,6 @@ use crate::{
     connections::Update, packets::{Packet, Side, UnsureThreshold}, scripts::{
         OwnType, Script,
         adaptations::{NbtBindings, UpdateBindings},
-        additional::{print, sleep},
     },
 };
 
@@ -43,8 +42,8 @@ fn packet_bindings(lua: &Lua, side: Side) -> LuaResult<LuaTable> {
 #[derive(Debug, Clone)]
 pub struct Engine {
     handlers: Arc<Mutex<[Option<(LuaRegistryKey, OwnType)>; 256]>>,
-    lua: Lua,
-    script: Arc<Script>, // because Script is heavy
+    pub(crate) lua: Lua,
+    pub(crate) script: Arc<Script>, // because Script is heavy
 }
 
 impl Engine {
@@ -68,14 +67,15 @@ impl Engine {
         self.lua.globals().set("s2c", packet_bindings(&self.lua, Side::S2C)?)?;
         self.lua.globals().set("c2s", packet_bindings(&self.lua, Side::C2S)?)?;
 
-        sleep(&self.lua)?;
-        print(&self.lua)?;
+        self.add_sleep()?;
+        self.add_print()?;
 
         Ok(())
     }
 
     pub async fn run(&self, code: &str) -> LuaResult<()> {
         info!("Loading script \"{}\"", self.script.name);
+        info!("{}", self.script.description);
         match self.script.engine_version {
             ver if ver < ENGINE_VERSION => return Err(LuaError::external(format!(
                 "The engine is outdated: the script is for engine v{}, current version is {}",

@@ -1,24 +1,33 @@
 use std::time::Duration;
 
-use mlua::{prelude::*};
+use mlua::prelude::*;
 use tracing::info;
 
-pub fn sleep(lua: &Lua) -> LuaResult<()> {
-    let sleep_binding = lua
-        .create_async_function(|_, millis: u64| async move {
+use crate::scripts::Engine;
+
+impl Engine {
+    pub fn add_sleep(&self) -> LuaResult<()> {
+        let sleep_binding = self.lua.create_async_function(|_, millis: u64| async move {
             tokio::time::sleep(Duration::from_millis(millis)).await;
             Ok(())
         })?;
 
-    lua.globals().set("sleep", sleep_binding)
-}
+        self.lua.globals().set("sleep", sleep_binding)
+    }
 
-pub fn print(lua: &Lua) -> LuaResult<()> {
-    let print_binding = lua
-        .create_async_function(|_, text: String| async move {
-            info!("[SCRIPT NAME] {}", text);
+    /// `print` only writes a log line, so there is nothing to await. Keeping it
+    /// synchronous lets the closure *borrow* the captured script instead of
+    /// moving it into a future — which removes both clones entirely.
+    ///
+    /// The single `Arc` bump below is unavoidable: the closure must be `'static`,
+    /// so it cannot borrow `self`.
+    pub fn add_print(&self) -> LuaResult<()> {
+        let script = self.script.clone();
+        let print_binding = self.lua.create_function(move |_, text: String| {
+            info!("[{} ({})] {}", script.name, script.uuid, text);
             Ok(())
         })?;
 
-    lua.globals().set("print", print_binding)
+        self.lua.globals().set("print", print_binding)
+    }
 }
