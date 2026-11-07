@@ -4,10 +4,12 @@ use tokio::net::TcpListener;
 use tracing::{error, info};
 
 use crate::{
-    connections::Connector, packets::{
+    connections::Connector,
+    packets::{
         Packet, UnsureThreshold,
         c2s::{self, packets::C2SPacket},
-    }, scripts::{Engine, engine::HandlerOptions, OwnType, Script},
+    },
+    scripts::{Engine, HandlerOptions, OwnType, Script},
 };
 
 mod buffer;

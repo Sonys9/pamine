@@ -5,12 +5,12 @@
 //! runs the sources and dispatches packets to the handlers they registered.
 //!
 //! Layout:
-//! - [`script`] — the archive itself (manifest + file tree assembly)
-//! - [`tree`] — the in-memory file tree
-//! - [`manifest`] — the `[script]` table of `Script.toml`
+//! - [`loader`] — everything about reading a script archive
+//!   - [`loader::script`] — the archive itself (tar unpacking, path validation)
+//!   - [`loader::tree`] — the in-memory file tree
+//!   - [`loader::manifest`] — the `[script]` table of `Script.toml`
+//! - [`engine`] — the Lua runtime, packet dispatch and [`HandlerOptions`]
 //! - [`own_type`] — what a handler is allowed to do with a packet
-//! - [`engine`] — the Lua runtime and packet dispatch
-//! - [`handler_options`] — what a handler receives
 //! - [`adaptations`] — Lua bindings for protocol types
 //! - [`additional`] — small globals (`print`, `sleep`)
 
@@ -20,9 +20,9 @@ pub mod loader;
 mod additional;
 mod own_type;
 
-pub use engine::Engine;
-pub use own_type::OwnType;
+pub use engine::{Engine, HandlerOptions};
 pub use loader::Script;
+pub use own_type::OwnType;
 
 #[cfg(test)]
 mod tests;
