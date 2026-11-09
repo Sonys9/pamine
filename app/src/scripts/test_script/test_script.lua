@@ -1,8 +1,8 @@
 -- Handlers receive one table: `opts.packet` and `opts.threshold`.
 
 engine:register(0, "read-inject", function(opts)
-    print("Got packet: " .. tostring(opts.packet.value.value.type) .. " is injected: " .. tostring(opts.is_injected))
-
+    print("Got packet and options: ", opts)
+    
     -- Correct pair: particle_id 24 (dust) with Dust payload.
     local ok = s2c.play.SetEntityMetadata {
         entity_id = 1,
