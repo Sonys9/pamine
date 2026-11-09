@@ -60,6 +60,41 @@ pub enum Side {
     S2C,
 }
 
+impl TryFrom<Side> for u8 {
+    type Error = ();
+
+    fn try_from(value: Side) -> Result<Self, Self::Error> {
+        Ok(match value {
+            Side::C2S => 0,
+            Side::S2C => 1,
+        })
+    }
+}
+
+impl TryFrom<u8> for Side {
+    type Error = &'static str;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        Ok(match value {
+            0 => Side::C2S,
+            1 => Side::S2C,
+            _ => return Err("Bad side id"),
+        })
+    }
+}
+
+impl TryFrom<&str> for Side {
+    type Error = &'static str;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Ok(match value {
+            "C2S" => Side::C2S,
+            "S2C" => Side::S2C,
+            _ => return Err("Bad side"),
+        })
+    }
+}
+
 pub struct AtomicState {
     pub state: AtomicU8,
 }
@@ -90,7 +125,7 @@ pub enum State {
 }
 
 impl TryFrom<u8> for State {
-    type Error = eyre::Report;
+    type Error = &'static str;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         Ok(match value {
@@ -98,13 +133,27 @@ impl TryFrom<u8> for State {
             1 => State::Login,
             2 => State::Play,
             3 => State::Status,
-            _ => eyre::bail!("Bad state id"),
+            _ => return Err("Bad state id"),
+        })
+    }
+}
+
+impl TryFrom<&str> for State {
+    type Error = &'static str;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Ok(match value {
+            "Handshake" => State::Handshake,
+            "Login" => State::Login,
+            "Play" => State::Play,
+            "Status" => State::Status,
+            _ => return Err("Bad state"),
         })
     }
 }
 
 impl TryFrom<State> for u8 {
-    type Error = eyre::Report;
+    type Error = ();
 
     fn try_from(value: State) -> Result<Self, Self::Error> {
         Ok(match value {

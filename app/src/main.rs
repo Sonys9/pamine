@@ -83,13 +83,13 @@ async fn scripting_stuff() {
         c2s::status::PingRequest { payload: 42 },
     )));
     let result_packet_0 = engine
-        .on_packet(0, HandlerOptions::new(&packet, &threshold, true), OwnType::ReadInject)
+        .on_packet(packets::Side::C2S, packets::State::Handshake, 0, HandlerOptions::new(&packet, &threshold, true), OwnType::ReadInject)
         .await
         .unwrap();
     info!("Result with packet 0: {:?}", result_packet_0);
     // The test script only registers packet 0, so this one has no handler.
     let result_packet_1 = engine
-        .on_packet(1, HandlerOptions::new(&packet, &threshold, false), OwnType::ReadWrite)
+        .on_packet(packets::Side::C2S, packets::State::Handshake, 1, HandlerOptions::new(&packet, &threshold, false), OwnType::ReadWrite)
         .await
         .unwrap();
     info!("Result with packet 1: {:?}", result_packet_1);
