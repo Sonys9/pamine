@@ -18,7 +18,7 @@ fn insert_is_order_independent() {
         .unwrap();
     root.insert(&["a".into()], Vec::new(), true).unwrap();
 
-    assert_eq!(root.file("a/b/c.lua"), Some(&b"hi"[..]));
+    assert_eq!(root.file("a/b/c.lua", false), Some(&b"hi"[..]));
     assert!(root.get("a").unwrap().as_folder().is_some());
 }
 
@@ -35,7 +35,7 @@ fn insert_keeps_the_last_duplicate_file() {
     root.insert(&["a.lua".into()], b"first".to_vec(), false).unwrap();
     root.insert(&["a.lua".into()], b"second".to_vec(), false).unwrap();
 
-    assert_eq!(root.file("a.lua"), Some(&b"second"[..]));
+    assert_eq!(root.file("a.lua", false), Some(&b"second"[..]));
     assert_eq!(root.as_folder().unwrap().len(), 1);
 }
 
@@ -52,15 +52,39 @@ fn sort_puts_folders_before_files() {
 fn unwraps_a_single_top_level_directory() {
     let root = folder("", vec![folder("script", vec![file("Script.toml", "[script]")])]);
     let unwrapped = Script::unwrap_archive_root(root).unwrap();
-    assert!(unwrapped.file("Script.toml").is_some());
+    assert!(unwrapped.file("Script.toml", false).is_some());
 }
 
 #[test]
 fn keeps_the_root_when_the_manifest_is_already_there() {
     let root = folder("", vec![file("Script.toml", "[script]"), folder("folder", Vec::new())]);
     let unwrapped = Script::unwrap_archive_root(root).unwrap();
-    assert!(unwrapped.file("Script.toml").is_some());
+    assert!(unwrapped.file("Script.toml", false).is_some());
     assert!(unwrapped.get("folder").is_some());
+}
+
+#[test]
+fn get_file_descends_into_folders() {
+    let mut root = folder("", Vec::new());
+    root.insert(&["folder".into(), "some_file.lua".into()], b"m".to_vec(), false)
+        .unwrap();
+
+    // Folders are matched by their exact name, files by their `.lua`-less name.
+    assert!(root.get_file("folder/some_file", true).is_some());
+    assert!(root.get_file("folder/some_file.lua", false).is_some());
+    assert!(root.get_file("folder/some_file", false).is_none());
+    assert!(root.get_file("folder", true).is_some());
+    assert!(root.get_file("nope/some_file", true).is_none());
+}
+
+#[test]
+fn get_file_only_strips_a_real_lua_suffix() {
+    let mut root = folder("", Vec::new());
+    root.insert(&["data.txt".into()], b"x".to_vec(), false).unwrap();
+
+    // `data.txt` must not be truncated to `data`.
+    assert!(root.get_file("data.txt", true).is_some());
+    assert!(root.get_file("data", true).is_none());
 }
 
 #[test]

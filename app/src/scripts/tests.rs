@@ -22,15 +22,24 @@ fn reads_the_manifest() {
 #[test]
 fn builds_the_file_tree() {
     let script = test_script();
-    assert!(script.files.file("Script.toml").is_some());
-    assert!(script.files.file("test_script.lua").is_some());
-    assert!(script.files.file("folder/data.txt").is_some());
-    assert!(script.files.file("folder/data2.txt").is_some());
-    assert!(script.files.file("folder/folder/data.txt").is_some());
-    assert!(script.files.file("folder2/data.txt").is_some());
+    assert!(script.files.file("Script.toml", false).is_some());
+    assert!(script.files.file("test_script.lua", false).is_some());
+    assert!(script.files.file("folder/data.txt", false).is_some());
+    assert!(script.files.file("folder/data2.txt", false).is_some());
+    assert!(script.files.file("folder/folder/data.txt", false).is_some());
+    assert!(script.files.file("folder2/data.txt", false).is_some());
     // An empty directory is not a file.
-    assert!(script.files.file("folder2/folder").is_none());
-    assert!(script.files.file("nope.lua").is_none());
+    assert!(script.files.file("folder2/folder", false).is_none());
+    assert!(script.files.file("nope.lua", false).is_none());
+}
+
+#[test]
+fn resolves_lua_modules_in_nested_folders() {
+    let script = test_script();
+    // `require("folder.some_file")` becomes `folder/some_file`.
+    assert!(script.files.file("folder/some_file", true).is_some());
+    assert!(script.files.file("required_file", true).is_some());
+    assert!(script.files.file("folder/some_file.lua", false).is_some());
 }
 
 #[test]

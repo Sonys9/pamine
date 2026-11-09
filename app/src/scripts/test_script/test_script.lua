@@ -1,8 +1,10 @@
 -- Handlers receive one table: `opts.packet` and `opts.threshold`.
-local helper = require("required_file")
+local required_file = require("required_file")
+local some_file = require("folder.some_file")
 
 engine:register(0, "read-inject", function(opts)
-    helper:helper()
+    required_file:helper()
+    some_file:print()
     print("Got packet and options: ", opts)
     
     -- Correct pair: particle_id 24 (dust) with Dust payload.

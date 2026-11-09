@@ -53,8 +53,8 @@ impl Engine {
     fn to_path(module: &mut str) {
         let bytes = unsafe { module.as_bytes_mut() };
         for byte in bytes {
-            if *byte == b'/' {
-                *byte = b'.';
+            if *byte == b'.' {
+                *byte = b'/';
             };
         };
     }

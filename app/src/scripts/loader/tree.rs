@@ -35,25 +35,41 @@ impl ScriptStruct {
     }
 
     /// Looks a node up by a `/`-separated path relative to this node.
+    ///
+    /// Both folders and files are matched, so intermediate path components can
+    /// descend into nested folders.
+    pub fn get(&self, path: impl AsRef<Path>) -> Option<&ScriptStruct> {
+        let mut current = self;
+        for component in path.as_ref().components() {
+            let Component::Normal(part) = component else { continue };
+            let part = part.to_string_lossy();
+            let children = current.as_folder()?;
+            current = children.iter().find(|child| child.name() == part.as_ref())?;
+        }
+        Some(current)
+    }
+
+    /// Looks a node up by a `/`-separated path relative to this node.
+    ///
+    /// When `is_lua` is set, a file's `.lua` extension is optional, so
+    /// `folder.some_file` (turned into `folder/some_file` by `require`) matches
+    /// `folder/some_file.lua`. Folders are always matched by their exact name.
     pub fn get_file(&self, path: impl AsRef<Path>, is_lua: bool) -> Option<&ScriptStruct> {
         let mut current = self;
         for component in path.as_ref().components() {
             let Component::Normal(part) = component else { continue };
             let part = part.to_string_lossy();
             let children = current.as_folder()?;
-            current = children.iter().find(|child| {
-                let ScriptStruct::File { name, content: _content } = child else {
-                    return false;
-                };
-                let script_name = if is_lua {
-                    match name.char_indices().nth_back(".lua".len() - 1) {
-                        Some((index, _)) => &name[..index],
-                        None => "",
-                    }
-                } else {
-                    name
-                };
-                script_name == part.as_ref()
+            current = children.iter().find(|child| match child {
+                ScriptStruct::Folder { name, .. } => name == part.as_ref(),
+                ScriptStruct::File { name, .. } => {
+                    let script_name = if is_lua {
+                        name.strip_suffix(".lua").unwrap_or(name)
+                    } else {
+                        name
+                    };
+                    script_name == part.as_ref()
+                }
             })?;
         }
         Some(current)
