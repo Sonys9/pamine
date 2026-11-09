@@ -2,7 +2,7 @@
 local required_file = require("required_file")
 local some_file = require("folder.some_file")
 
-engine:register("c2s", "play", 0, "read-inject", function(opts)
+engine:register("Handshake", "C2S", 0, "read-inject", function(opts)
     required_file:helper()
     some_file:print()
     print("Got packet and options: ", opts)
