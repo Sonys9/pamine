@@ -2,10 +2,14 @@
 local required_file = require("required_file")
 local some_file = require("folder.some_file")
 
-engine:register("Handshake", "C2S", 0, "read-inject", function(opts)
+-- Register by packet constructor, not by a numeric opcode. The constructor
+-- carries its own `opcode`, `side` and `state`, so the engine can read them
+-- back and reject a registration that names the wrong phase.
+engine:register("Handshake", "C2S", c2s.handshake.Handshaking, "read-inject", function(opts)
     required_file:helper()
     some_file:print()
     print("Got packet and options: ", opts)
+    print("Registered packet: ", c2s.handshake.Handshaking.name, c2s.handshake.Handshaking.opcode)
     print(s2c.play.SetEntityMetadata)
 
     -- Correct pair: particle_id 24 (dust) with Dust payload.

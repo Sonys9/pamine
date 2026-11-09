@@ -28,6 +28,21 @@
 //! }
 //! ```
 //!
+//! Each constructor is a table with a `__call` metamethod, not a bare
+//! function, so it can also carry the metadata a handler registration needs:
+//!
+//! ```lua
+//! s2c.play.SetEntityMetadata.opcode -- 0x50
+//! s2c.play.SetEntityMetadata.side   -- "S2C"
+//! s2c.play.SetEntityMetadata.state  -- "Play"
+//! s2c.play.SetEntityMetadata.name   -- "SetEntityMetadata"
+//!
+//! engine:register("Play", "S2C", s2c.play.SetEntityMetadata, "read", handler)
+//! ```
+//!
+//! The side and state are supplied by the caller of `lua_bindings`, because the
+//! derive has no way to know which protocol phase an enum belongs to.
+//!
 //! ## Why encode instead of building the struct
 //!
 //! Most packet structs borrow from the decode buffer (`&'a str`, `&'a [u8]`).
@@ -644,18 +659,37 @@ fn expand_opcode_enum(
         let inner = &fields.unnamed[0].ty;
 
         let key = variant_name.to_string();
+        // Each constructor is a table with a `__call` metamethod rather than a
+        // bare function, so it can also carry the metadata a handler
+        // registration needs (`opcode`, `side`, `state`, `name`). A script then
+        // writes `engine:register("Play", "S2C", s2c.play.SetEntityMetadata, ...)`
+        // instead of hard-coding the numeric opcode.
         sets.push(quote! {
-            table.set(
-                #key,
-                lua.create_function(|_, fields: ::mlua::Table| {
-                    let mut encoder = ::pcore::encoder::Encoder::new();
-                    <#inner>::lua_encode_table(&fields, &mut encoder)?;
-                    ::core::result::Result::Ok(::pcore::lua::LuaPacketValue::new(
-                        #opcode,
-                        encoder.into_bytes(),
-                    ))
-                })?,
-            )?;
+            {
+                let constructor = lua.create_table()?;
+                constructor.set("opcode", #opcode)?;
+                constructor.set("side", side)?;
+                constructor.set("state", state)?;
+                constructor.set("name", #key)?;
+
+                let meta = lua.create_table()?;
+                meta.set(
+                    "__call",
+                    lua.create_function(
+                        |_, (_self, fields): (::mlua::Table, ::mlua::Table)| {
+                            let mut encoder = ::pcore::encoder::Encoder::new();
+                            <#inner>::lua_encode_table(&fields, &mut encoder)?;
+                            ::core::result::Result::Ok(::pcore::lua::LuaPacketValue::new(
+                                #opcode,
+                                encoder.into_bytes(),
+                            ))
+                        },
+                    )?,
+                )?;
+                constructor.set_metatable(::core::option::Option::Some(meta))?;
+
+                table.set(#key, constructor)?;
+            }
         });
     }
 
@@ -664,7 +698,16 @@ fn expand_opcode_enum(
     Ok(quote! {
         impl #impl_generics #name #ty_generics #where_clause {
             /// Builds the Lua namespace of constructors for this enum.
-            pub fn lua_bindings(lua: &::mlua::Lua) -> ::mlua::Result<::mlua::Table> {
+            ///
+            /// `side` and `state` are the protocol direction and phase this
+            /// enum belongs to (`"S2C"` / `"Play"`, …). They are stamped onto
+            /// every constructor so `engine:register` can read them back
+            /// instead of asking the script for a numeric opcode.
+            pub fn lua_bindings(
+                lua: &::mlua::Lua,
+                side: &str,
+                state: &str,
+            ) -> ::mlua::Result<::mlua::Table> {
                 let table = lua.create_table()?;
                 #(#sets)*
                 ::core::result::Result::Ok(table)

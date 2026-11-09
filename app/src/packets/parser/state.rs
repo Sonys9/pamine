@@ -95,6 +95,15 @@ impl TryFrom<&str> for Side {
     }
 }
 
+impl From<Side> for &'static str {
+    fn from(value: Side) -> Self {
+        match value {
+            Side::C2S => "C2S",
+            Side::S2C => "S2C",
+        }
+    }
+}
+
 pub struct AtomicState {
     pub state: AtomicU8,
 }

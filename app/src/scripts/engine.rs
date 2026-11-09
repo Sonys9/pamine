@@ -4,7 +4,9 @@ use mlua::{Function, StdLib, prelude::*};
 use tracing::{info, warn};
 
 use crate::{
-    connections::Update, packets::{Packet, Side, State, UnsureThreshold, s2c::play::Play::SynchronizePlayerPosition}, scripts::{
+    connections::Update,
+    packets::{Packet, Side, State, UnsureThreshold, s2c::play::Play::SynchronizePlayerPosition},
+    scripts::{
         OwnType, Script,
         adaptations::{NbtBindings, UpdateBindings},
     },
@@ -21,20 +23,41 @@ const STATES: usize = 4;
 /// The nesting mirrors the Rust enums, so a script writes
 /// `s2c.play.ChatMessage { ... }` and gets the opcode from the variant's
 /// `#[id(N)]` — never from the packet body, which would be wrong.
+///
+/// Every constructor is stamped with its `side` and `state`, so
+/// [`Engine::register`] can read the opcode straight off the constructor the
+/// script passes in instead of asking for a numeric id.
 fn packet_bindings(lua: &Lua, side: Side) -> LuaResult<LuaTable> {
     let table = lua.create_table()?;
+    let side_name: &'static str = side.into();
+
+    // Binds one phase's constructors under `key`, stamping `state` on them.
+    macro_rules! bind {
+        ($key:literal, $state:literal, $module:path) => {
+            table.set($key, <$module>::lua_bindings(lua, side_name, $state)?)?;
+        };
+    }
+
     match side {
         Side::S2C => {
-            table.set("handshake", crate::packets::s2c::handshake::Handshake::lua_bindings(lua)?)?;
-            table.set("login", crate::packets::s2c::login::Login::lua_bindings(lua)?)?;
-            table.set("play", crate::packets::s2c::play::Play::lua_bindings(lua)?)?;
-            table.set("status", crate::packets::s2c::status::Status::lua_bindings(lua)?)?;
+            bind!(
+                "handshake",
+                "Handshake",
+                crate::packets::s2c::handshake::Handshake
+            );
+            bind!("login", "Login", crate::packets::s2c::login::Login);
+            bind!("play", "Play", crate::packets::s2c::play::Play);
+            bind!("status", "Status", crate::packets::s2c::status::Status);
         }
         Side::C2S => {
-            table.set("handshake", crate::packets::c2s::handshake::Handshake::lua_bindings(lua)?)?;
-            table.set("login", crate::packets::c2s::login::Login::lua_bindings(lua)?)?;
-            table.set("play", crate::packets::c2s::play::Play::lua_bindings(lua)?)?;
-            table.set("status", crate::packets::c2s::status::Status::lua_bindings(lua)?)?;
+            bind!(
+                "handshake",
+                "Handshake",
+                crate::packets::c2s::handshake::Handshake
+            );
+            bind!("login", "Login", crate::packets::c2s::login::Login);
+            bind!("play", "Play", crate::packets::c2s::play::Play);
+            bind!("status", "Status", crate::packets::c2s::status::Status);
         }
     }
     Ok(table)
@@ -66,8 +89,12 @@ impl Engine {
         self.lua.globals().set("engine", self.clone())?;
         self.lua.globals().set("update", UpdateBindings)?;
         self.lua.globals().set("nbt", NbtBindings)?;
-        self.lua.globals().set("s2c", packet_bindings(&self.lua, Side::S2C)?)?;
-        self.lua.globals().set("c2s", packet_bindings(&self.lua, Side::C2S)?)?;
+        self.lua
+            .globals()
+            .set("s2c", packet_bindings(&self.lua, Side::S2C)?)?;
+        self.lua
+            .globals()
+            .set("c2s", packet_bindings(&self.lua, Side::C2S)?)?;
 
         self.add_sleep()?;
         self.add_print()?;
@@ -80,10 +107,12 @@ impl Engine {
         info!("Loading script \"{}\"", self.script.name);
         info!("{}", self.script.description);
         match self.script.engine_version {
-            ver if ver < ENGINE_VERSION => return Err(LuaError::external(format!(
-                "The engine is outdated: the script is for engine v{}, current version is {}",
-                self.script.engine_version, ENGINE_VERSION
-            ))),
+            ver if ver < ENGINE_VERSION => {
+                return Err(LuaError::external(format!(
+                    "The engine is outdated: the script is for engine v{}, current version is {}",
+                    self.script.engine_version, ENGINE_VERSION
+                )));
+            }
             ver if ver > ENGINE_VERSION => warn!(
                 "The script is outdated: the script is for engine v{}, current version is {}",
                 self.script.engine_version, ENGINE_VERSION
@@ -99,14 +128,82 @@ impl Engine {
         (side_id * 256) + (state_id * 256 * SIDES) + packet_id as usize
     }
 
-    fn register(&self, state: &str, side: &str, packet_id: u8, own_type: String, func: Function) -> LuaResult<()> {
-        let state = State::try_from(state).map_err(|e| LuaError::runtime(e))?;
-        let side = Side::try_from(side).map_err(|e| LuaError::runtime(e))?;
+    /// Registers a handler for one packet.
+    ///
+    /// `packet` is a constructor from the `s2c` / `c2s` namespaces, e.g.
+    /// `s2c.play.SetEntityMetadata`. The opcode, side and state are read off
+    /// that constructor, so a script never has to hard-code a numeric id:
+    ///
+    /// ```lua
+    /// engine:register("Play", "S2C", s2c.play.SetEntityMetadata, "read", handler)
+    /// ```
+    ///
+    /// The `state` and `side` arguments are still accepted (and checked against
+    /// the constructor) so a typo is reported instead of silently registering
+    /// the handler under the wrong phase. A plain integer is also accepted for
+    /// backwards compatibility.
+    fn register(
+        &self,
+        state: &str,
+        side: &str,
+        packet: LuaValue,
+        own_type: String,
+        func: Function,
+    ) -> LuaResult<()> {
+        let state = State::try_from(state).map_err(LuaError::runtime)?;
+        let side = Side::try_from(side).map_err(LuaError::runtime)?;
+
+        let packet_id = match packet {
+            // A constructor table: read the metadata the derive stamped on it.
+            LuaValue::Table(ref constructor) => {
+                let opcode: i32 = constructor.get("opcode")?;
+                let packet_id = u8::try_from(opcode).map_err(|_| {
+                    LuaError::runtime(format!("packet opcode {opcode} does not fit in a u8"))
+                })?;
+
+                // The constructor knows its own side and state; a mismatch means
+                // the script registered it under the wrong phase, which would
+                // never fire. Report it rather than silently doing nothing.
+                if let Some(constructor_side) = constructor.get::<Option<String>>("side")? {
+                    let constructor_side =
+                        Side::try_from(constructor_side.as_str()).map_err(LuaError::runtime)?;
+                    if constructor_side != side {
+                        return Err(LuaError::runtime(format!(
+                            "packet is a {} packet, but it was registered as {}",
+                            <&'static str>::from(constructor_side),
+                            <&'static str>::from(side),
+                        )));
+                    }
+                }
+                if let Some(constructor_state) = constructor.get::<Option<String>>("state")? {
+                    let constructor_state =
+                        State::try_from(constructor_state.as_str()).map_err(LuaError::runtime)?;
+                    if constructor_state != state {
+                        return Err(LuaError::runtime(format!(
+                            "packet belongs to the {constructor_state:?} state, but it was registered as {state:?}",
+                        )));
+                    }
+                }
+
+                packet_id
+            }
+            // Backwards compatibility: a bare opcode.
+            LuaValue::Integer(opcode) => u8::try_from(opcode).map_err(|_| {
+                LuaError::runtime(format!("packet opcode {opcode} does not fit in a u8"))
+            })?,
+            other => {
+                return Err(LuaError::runtime(format!(
+                    "expected a packet constructor (e.g. s2c.play.SetEntityMetadata), got {}",
+                    other.type_name()
+                )));
+            }
+        };
 
         let key = self.lua.create_registry_value(func)?;
         let own_type = OwnType::try_from(own_type.as_str()).map_err(LuaError::external)?;
-        
-        self.handlers.lock().unwrap()[Self::calc_index(packet_id, side, state)] = Some(Handler { key, own_type });
+
+        self.handlers.lock().unwrap()[Self::calc_index(packet_id, side, state)] =
+            Some(Handler { key, own_type });
         Ok(())
     }
 
@@ -166,9 +263,15 @@ impl LuaUserData for Engine {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
         methods.add_method_mut(
             "register",
-            |_lua, this, (state, side, packet_id, own_type, func): (String, String, u8, String, Function)| {
-                this.register(&state, &side, packet_id, own_type, func)
-            },
+            |_lua,
+             this,
+             (state, side, packet, own_type, func): (
+                String,
+                String,
+                LuaValue,
+                String,
+                Function,
+            )| { this.register(&state, &side, packet, own_type, func) },
         );
     }
 }
@@ -181,7 +284,11 @@ pub struct HandlerOptions<'a> {
 
 impl<'a> HandlerOptions<'a> {
     pub fn new(packet: &'a Packet<'a>, threshold: &'a UnsureThreshold, is_injected: bool) -> Self {
-        Self { packet, threshold, is_injected }
+        Self {
+            packet,
+            threshold,
+            is_injected,
+        }
     }
 }
 
