@@ -12,7 +12,7 @@
 //! - [`engine`] — the Lua runtime, packet dispatch and [`HandlerOptions`]
 //! - [`own_type`] — what a handler is allowed to do with a packet
 //! - [`adaptations`] — Lua bindings for protocol types
-//! - [`additional`] — small globals (`print`, `sleep`)
+//! - [`additional`] — small globals (`print`, `sleep`, `require`)
 
 pub mod adaptations;
 pub mod engine;

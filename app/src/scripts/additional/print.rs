@@ -1,25 +1,12 @@
-//! Small globals exposed to every script: `print` and `sleep`.
-
-use std::time::Duration;
-
 use mlua::prelude::*;
 
 use crate::scripts::Engine;
 
 /// How deep `print` descends into nested tables. Guards against
 /// self-referencing tables turning a `print` call into an infinite loop.
-const MAX_PRINT_DEPTH: u16 = 16;
+const MAX_PRINT_DEPTH: u8 = 32;
 
 impl Engine {
-    pub fn add_sleep(&self) -> LuaResult<()> {
-        let sleep = self.lua.create_async_function(|_, millis: u64| async move {
-            tokio::time::sleep(Duration::from_millis(millis)).await;
-            Ok(())
-        })?;
-
-        self.lua.globals().set("sleep", sleep)
-    }
-
     /// `print` only writes a log line, so there is nothing to await. Keeping it
     /// synchronous means the closure can capture the script by value without
     /// wrapping it in a future.
@@ -43,7 +30,7 @@ impl Engine {
         self.lua.globals().set("print", print)
     }
 
-    fn print_value(value: LuaValue, depth: u16) -> LuaResult<()> {
+    fn print_value(value: LuaValue, depth: u8) -> LuaResult<()> {
         match value {
             LuaValue::Nil => print!("nil"),
             LuaValue::Boolean(b) => print!("{b}"),
@@ -61,7 +48,7 @@ impl Engine {
         Ok(())
     }
 
-    fn print_table(table: LuaTable, depth: u16) -> LuaResult<()> {
+    fn print_table(table: LuaTable, depth: u8) -> LuaResult<()> {
         if depth >= MAX_PRINT_DEPTH {
             print!("<table nested too deeply>");
             return Ok(());

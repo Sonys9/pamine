@@ -69,6 +69,7 @@ impl Engine {
 
         self.add_sleep()?;
         self.add_print()?;
+        self.add_require()?;
 
         Ok(())
     }
