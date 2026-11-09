@@ -35,20 +35,33 @@ impl ScriptStruct {
     }
 
     /// Looks a node up by a `/`-separated path relative to this node.
-    pub fn get(&self, path: impl AsRef<Path>) -> Option<&ScriptStruct> {
+    pub fn get_file(&self, path: impl AsRef<Path>, is_lua: bool) -> Option<&ScriptStruct> {
         let mut current = self;
         for component in path.as_ref().components() {
             let Component::Normal(part) = component else { continue };
             let part = part.to_string_lossy();
             let children = current.as_folder()?;
-            current = children.iter().find(|child| child.name() == part.as_ref())?;
+            current = children.iter().find(|child| {
+                let ScriptStruct::File { name, content: _content } = child else {
+                    return false;
+                };
+                let script_name = if is_lua {
+                    match name.char_indices().nth_back(".lua".len() - 1) {
+                        Some((index, _)) => &name[..index],
+                        None => "",
+                    }
+                } else {
+                    name
+                };
+                script_name == part.as_ref()
+            })?;
         }
         Some(current)
     }
 
-    /// Reads a file by a `/`-separated path relative to this node.
-    pub fn file(&self, path: impl AsRef<Path>) -> Option<&[u8]> {
-        self.get(path)?.as_file()
+    /// Reads a lua script file by a `/`-separated path relative to this node.
+    pub fn file(&self, path: impl AsRef<Path>, is_lua: bool) -> Option<&[u8]> {
+        self.get_file(path, is_lua)?.as_file()
     }
 
     /// Inserts `content` at `components`, creating intermediate folders as

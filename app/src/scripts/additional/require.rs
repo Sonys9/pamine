@@ -43,7 +43,7 @@ impl Engine {
     fn find_script<'a>(path: &str, script: &'a Script) -> LuaResult<&'a str> {
         let bytes = script
             .files
-            .file(path)
+            .file(path, true)
             .ok_or_else(|| LuaError::runtime(format!("module `{path}` not found in the script")))?;
         std::str::from_utf8(bytes)
             .map_err(|e| LuaError::runtime(format!("module `{path}` is not valid UTF-8: {e}")))

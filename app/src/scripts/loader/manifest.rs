@@ -16,7 +16,7 @@ impl ScriptMeta {
     /// Reads and validates `Script.toml` from the root of the script tree.
     pub fn parse(files: &ScriptStruct) -> eyre::Result<Self> {
         let raw = files
-            .file("Script.toml")
+            .file("Script.toml", false)
             .ok_or_else(|| eyre::eyre!("The script archive has no `Script.toml` in its root"))?;
         let raw = std::str::from_utf8(raw)
             .map_err(|e| eyre::eyre!("`Script.toml` is not valid UTF-8: {e}"))?;

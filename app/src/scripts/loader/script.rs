@@ -28,7 +28,7 @@ impl Script {
         let files = Self::read_archive(script_archive)?;
         let meta = ScriptMeta::parse(&files)?;
 
-        if files.file(&meta.main_file).is_none() {
+        if files.file(&meta.main_file, false).is_none() {
             eyre::bail!(
                 "Script.toml points to `{}` as the main file, but the archive does not contain it",
                 meta.main_file
@@ -47,7 +47,7 @@ impl Script {
 
     /// The Lua source of the script's entry point.
     pub fn main_code(&self) -> eyre::Result<&str> {
-        let bytes = self.files.file(&self.main_file).ok_or_else(|| {
+        let bytes = self.files.file(&self.main_file, false).ok_or_else(|| {
             eyre::eyre!("The main file `{}` is missing from the script", self.main_file)
         })?;
         std::str::from_utf8(bytes)
@@ -114,7 +114,7 @@ impl Script {
         // Only unwrap when the single top-level directory actually holds the
         // manifest; otherwise the manifest is already at the archive root.
         if let [ScriptStruct::Folder { .. }] = content.as_slice()
-            && content[0].file("Script.toml").is_some()
+            && content[0].file("Script.toml", false).is_some()
         {
             return Ok(content.into_iter().next().expect("length checked above"));
         }
