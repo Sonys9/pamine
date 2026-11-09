@@ -18,19 +18,19 @@ impl Engine {
         let cache: Arc<Mutex<HashMap<String, LuaRegistryKey>>> =
             Arc::new(Mutex::new(HashMap::new()));
 
-        let require = self.lua.create_function(move |lua, path: String| {
+        let require = self.lua.create_function(move |lua, mut module: String| {
             {
                 let cache = cache.lock().unwrap();
-                if let Some(key) = cache.get(&path) {
+                if let Some(key) = cache.get(&module) {
                     return lua.registry_value(key);
                 }
             }
-            let code = Self::find_script(&path, &script)?;
-            let result: LuaValue = lua.load(code).set_name(&path).eval()?;
+            let code = Self::find_script(&mut module, &script)?;
+            let result: LuaValue = lua.load(code).set_name(&module).eval()?;
             let key = lua.create_registry_value(result.clone())?;
             cache.lock()
                 .unwrap()
-                .insert(path, key);
+                .insert(module, key);
             Ok(result)
         })?;
 
@@ -40,12 +40,22 @@ impl Engine {
 
     /// Looks a module up in the script archive. The returned slice borrows from
     /// `script`, so the lifetime is tied to it rather than being unconstrained.
-    fn find_script<'a>(path: &str, script: &'a Script) -> LuaResult<&'a str> {
+    fn find_script<'a>(path: &mut str, script: &'a Script) -> LuaResult<&'a str> {
+        Self::to_path(path);
         let bytes = script
             .files
-            .file(path, true)
+            .file(&mut *path, true)
             .ok_or_else(|| LuaError::runtime(format!("module `{path}` not found in the script")))?;
         std::str::from_utf8(bytes)
             .map_err(|e| LuaError::runtime(format!("module `{path}` is not valid UTF-8: {e}")))
+    }
+
+    fn to_path(module: &mut str) {
+        let bytes = unsafe { module.as_bytes_mut() };
+        for byte in bytes {
+            if *byte == b'/' {
+                *byte = b'.';
+            };
+        };
     }
 }
