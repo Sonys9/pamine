@@ -17,11 +17,11 @@ engine:register(0, "read-inject", function(opts)
             },
         },
     }
-    print("Valid particle opcode: " .. tostring(ok.opcode))
+    print("Valid particle opcode: ", ok.opcode)
 
     local inject = update.injection(true)
     inject:push_packet(ok, opts.threshold)
-    print("Valid injection len: " .. tostring(inject.len))
+    print("Valid injection len: ", inject.len)
 
     return update.inject(inject)
 end)
