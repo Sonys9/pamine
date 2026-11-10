@@ -9,7 +9,7 @@
 use super::Script;
 
 fn test_script() -> Script {
-    Script::parse(include_bytes!("../../../tests/scripts/test_script.tar").to_vec())
+    Script::parse(include_bytes!("../../tests/scripts/test_script.tar").to_vec())
         .expect("the bundled test script must parse")
 }
 

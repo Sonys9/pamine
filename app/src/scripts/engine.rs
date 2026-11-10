@@ -5,7 +5,7 @@ use tracing::{info, warn};
 
 use crate::{
     connections::Update,
-    packets::{Packet, Side, State, UnsureThreshold, s2c::play::Play::SynchronizePlayerPosition},
+    packets::{Packet, Side, State, UnsureThreshold},
     scripts::{
         OwnType, Script,
         adaptations::{NbtBindings, UpdateBindings},
