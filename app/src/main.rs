@@ -63,7 +63,7 @@ async fn main() {
 }
 
 async fn scripting_stuff() {
-    let script = Script::parse(include_bytes!("scripts/tests/test_script.tar").to_vec()).unwrap();
+    let script = Script::parse(include_bytes!("../tests/scripts/test_script.tar").to_vec()).unwrap();
     let code = script.main_code().unwrap().to_owned();
     let engine = Engine::new(Arc::new(script)).unwrap();
     engine.set_globals().unwrap();

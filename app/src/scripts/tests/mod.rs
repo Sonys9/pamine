@@ -1,11 +1,15 @@
 //! End-to-end tests against the bundled `test_script.tar`.
 //!
 //! Unit tests for the archive internals live in [`crate::scripts::loader`].
+//!
+//! The archive and the sources it was built from both live in
+//! `app/tests/scripts/`, next to the other test fixtures, rather than inside
+//! `src/`. Rebuild it with `app/tests/scripts/build.sh` after editing a source.
 
 use super::Script;
 
 fn test_script() -> Script {
-    Script::parse(include_bytes!("test_script.tar").to_vec())
+    Script::parse(include_bytes!("../../../tests/scripts/test_script.tar").to_vec())
         .expect("the bundled test script must parse")
 }
 
