@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use mlua::{Function, StdLib, prelude::*};
+use parking_lot::RwLock;
 use tracing::{info, warn};
 
 use crate::{
@@ -66,7 +67,7 @@ fn packet_bindings(lua: &Lua, side: Side) -> LuaResult<LuaTable> {
 // Cheap to copy because Lua is Arc + bool
 #[derive(Debug, Clone)]
 pub struct Engine {
-    handlers: Arc<Mutex<[Option<Handler>; 256 * SIDES * STATES]>>, // There is 2 sides and 4 states
+    handlers: Arc<RwLock<[Option<Handler>; 256 * SIDES * STATES]>>, // There is 2 sides and 4 states
     pub(crate) lua: Lua,
     pub(crate) script: Arc<Script>, // because Script is heavy
 }
@@ -79,7 +80,7 @@ impl Engine {
         )?;
 
         Ok(Self {
-            handlers: Arc::new(Mutex::new([const { None }; 256 * 2 * 4])),
+            handlers: Arc::new(RwLock::new([const { None }; 256 * 2 * 4])),
             lua,
             script,
         })
@@ -199,7 +200,7 @@ impl Engine {
 
         let key = self.lua.create_registry_value(func)?;
 
-        self.handlers.lock().unwrap()[Self::calc_index(packet_id, side, state)] = Some(Handler {
+        self.handlers.write()[Self::calc_index(packet_id, side, state)] = Some(Handler {
             key,
             own_type,
             is_blocking,
@@ -214,7 +215,7 @@ impl Engine {
         side: Side,
         own_type: OwnType,
     ) -> LuaResult<Option<FunctionData>> {
-        let handlers = self.handlers.lock().unwrap();
+        let handlers = self.handlers.read();
         let Some(ref handler) = handlers[Self::calc_index(packet_id, side, state)] else {
             return Ok(None);
         };
