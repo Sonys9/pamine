@@ -6,7 +6,7 @@ use tracing::{error, info};
 use crate::{
     connections::Connector, packets::{
         Packet, Side, State, UnsureThreshold, c2s::{self, packets::C2SPacket},
-    }, scripts::{Engine, HandlerOptions, OwnType, Script},
+    }, scripts::{Engine, HandlerOptions, OwnType, Script, ScriptData, ScriptStorage},
 };
 
 mod buffer;
@@ -60,29 +60,25 @@ async fn main() {
 }
 
 async fn scripting_stuff() {
-    let script =
-        Script::parse(include_bytes!("../tests/scripts/test_script.tar").to_vec()).unwrap();
-    let code = script.main_code().unwrap().to_owned();
-    let engine = Engine::new(Arc::new(script)).unwrap();
-    engine.set_globals().unwrap();
-    tokio::spawn({
-        let engine = engine.clone(); // Doesn't really cost anything since that's an Arc<...>
-        async move {
-            engine.run(&code).await.unwrap();
-        }
-    });
+    let mut script_storage = ScriptStorage::default();
+    let first_script = Arc::new(new_script());
+    let second_script = Arc::new(new_script());
+    script_storage.insert(first_script.clone()).unwrap();
+    script_storage.insert(second_script.clone()).unwrap();
+    // should crash because they have the same UUID
+
     let threshold = UnsureThreshold::new();
     threshold.set(256);
     tokio::time::sleep(Duration::from_millis(200)).await; // Wait till it loads
     let packet = Packet::C2S(C2SPacket::Status(c2s::status::Status::PingRequest(
         c2s::status::PingRequest { payload: 42 },
     )));
-    let Some(own_type) = engine.own_type(0, packets::State::Handshake, packets::Side::C2S) else {
+    let Some(own_type) = first_script.engine.own_type(0, packets::State::Handshake, packets::Side::C2S) else {
         panic!("Packet handler is not yet registered");
     };
     let packet = packet.to_owned();
     handle_packet(
-        &engine,
+        &first_script.engine,
         packets::State::Handshake,
         packets::Side::C2S,
         &packet,
@@ -124,4 +120,19 @@ async fn handle_packet<'a>(engine: &Engine, state: State, side: Side, packet: &'
     if func_data.is_blocking {
         packet_join_handler.await.unwrap();
     };
+}
+
+fn new_script() -> ScriptData {
+    let script =
+        Arc::new(Script::parse(include_bytes!("../tests/scripts/test_script.tar").to_vec()).unwrap());
+    let code = script.main_code().unwrap().to_owned();
+    let engine = Engine::new(script.clone()).unwrap();
+    engine.set_globals().unwrap();
+    tokio::spawn({
+        let engine = engine.clone(); // Doesn't really cost anything since that's an Arc<...>
+        async move {
+            engine.run(&code).await.unwrap();
+        }
+    });
+    ScriptData { script, engine }
 }

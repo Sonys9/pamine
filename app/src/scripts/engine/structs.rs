@@ -7,9 +7,9 @@ use crate::{
 
 impl LuaUserData for Engine {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
-        methods.add_method_mut("register", |lua, this, options: LuaValue| {
+        methods.add_method_mut("register", |lua, this, (options, func): (LuaValue, Function)| {
             let register_options = RegisterOptions::from_lua(options, lua)?;
-            this.register(register_options)
+            this.register(register_options, func)
         });
     }
 }
@@ -20,7 +20,6 @@ pub struct RegisterOptions {
     pub packet: LuaValue,
     pub own_type: OwnType,
     pub is_blocking: bool,
-    pub function: Function,
 }
 
 impl FromLua for RegisterOptions {
@@ -33,14 +32,12 @@ impl FromLua for RegisterOptions {
         let packet: LuaValue = table.get("packet")?;
         let own_type: String = table.get("own_type")?;
         let is_blocking: bool = table.get("is_blocking")?;
-        let function: Function = table.get("function")?;
         Ok(Self {
             state: State::try_from(state.as_str()).map_err(|e| LuaError::runtime(e))?,
             side: Side::try_from(side.as_str()).map_err(|e| LuaError::runtime(e))?,
             packet,
             own_type: OwnType::try_from(own_type.as_str()).map_err(|e| LuaError::runtime(e))?,
             is_blocking,
-            function,
         })
     }
 }

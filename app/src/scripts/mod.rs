@@ -19,10 +19,12 @@ mod additional;
 pub mod engine;
 pub mod loader;
 mod own_type;
+pub mod storage;
 
 pub use engine::{Engine, HandlerOptions};
 pub use loader::Script;
 pub use own_type::OwnType;
+pub use storage::*;
 
 #[cfg(test)]
 mod tests;

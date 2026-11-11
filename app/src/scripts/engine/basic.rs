@@ -127,13 +127,13 @@ impl Engine {
     /// the constructor) so a typo is reported instead of silently registering
     /// the handler under the wrong phase. A plain integer is also accepted for
     /// backwards compatibility.
-    pub fn register(&self, register_options: RegisterOptions) -> LuaResult<()> {
+    pub fn register(&self, register_options: RegisterOptions, func: Function) -> LuaResult<()> {
         let packet_id = Self::parse_packet_id(
             register_options.state,
             register_options.side,
             register_options.packet,
         )?;
-        let key = self.lua.create_registry_value(register_options.function)?;
+        let key = self.lua.create_registry_value(func)?;
 
         self.handlers.write()
             [Self::calc_index(packet_id, register_options.side, register_options.state)] =
