@@ -80,29 +80,25 @@ async fn scripting_stuff() {
     let packet = Packet::C2S(C2SPacket::Status(c2s::status::Status::PingRequest(
         c2s::status::PingRequest { payload: 42 },
     )));
+    let func_data = engine
+        .get_func(
+            0,
+            packets::State::Handshake,
+            packets::Side::C2S,
+            OwnType::ReadInject,
+        )
+        .unwrap()
+        .unwrap();
     let result_packet_0 = engine
         .on_packet(
-            packets::Side::C2S,
-            packets::State::Handshake,
+            func_data.function,
+            OwnType::ReadInject,
             0,
             HandlerOptions::new(&packet, &threshold, true),
-            OwnType::ReadInject,
         )
         .await
         .unwrap();
     info!("Result with packet 0: {:?}", result_packet_0);
-    // The test script only registers packet 0, so this one has no handler.
-    let result_packet_1 = engine
-        .on_packet(
-            packets::Side::C2S,
-            packets::State::Handshake,
-            1,
-            HandlerOptions::new(&packet, &threshold, false),
-            OwnType::ReadWrite,
-        )
-        .await
-        .unwrap();
-    info!("Result with packet 1: {:?}", result_packet_1);
 
     tokio::time::sleep(Duration::from_millis(400)).await; // And till it handles it
 }

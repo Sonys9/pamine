@@ -147,7 +147,9 @@ impl Engine {
         state: State,
         side: Side,
         packet: LuaValue,
-        function_data: FunctionData,
+        func: Function,
+        own_type: OwnType,
+        is_blocking: bool,
     ) -> LuaResult<()> {
         let packet_id = match packet {
             // A constructor table: read the metadata the derive stamped on it.
@@ -195,35 +197,43 @@ impl Engine {
             }
         };
 
-        let key = self.lua.create_registry_value(function_data.function)?;
+        let key = self.lua.create_registry_value(func)?;
 
-        self.handlers.lock().unwrap()[Self::calc_index(packet_id, side, state)] =
-            Some(Handler { key, own_type: function_data.own_type, is_blocking: function_data.is_blocking });
+        self.handlers.lock().unwrap()[Self::calc_index(packet_id, side, state)] = Some(Handler {
+            key,
+            own_type,
+            is_blocking,
+        });
         Ok(())
     }
 
-    pub fn get_func(packet_id: u8, state: State, side: Side) -> FunctionData {
-        todo!()
+    pub fn get_func(
+        &self,
+        packet_id: u8,
+        state: State,
+        side: Side,
+        own_type: OwnType,
+    ) -> LuaResult<Option<FunctionData>> {
+        let handlers = self.handlers.lock().unwrap();
+        let Some(ref handler) = handlers[Self::calc_index(packet_id, side, state)] else {
+            return Ok(None);
+        };
+        if handler.own_type != own_type {
+            return Ok(None);
+        };
+        Ok(Some(FunctionData {
+            function: self.lua.registry_value(&handler.key)?,
+            is_blocking: handler.is_blocking,
+        }))
     }
 
     pub async fn on_packet(
         &self,
-        side: Side,
-        state: State,
+        func: Function,
+        own_type: OwnType,
         packet_id: u8,
         options: HandlerOptions<'_>,
-        own_type: OwnType,
     ) -> LuaResult<Option<Option<Update>>> {
-        let func: Function = {
-            let handlers = self.handlers.lock().unwrap();
-            let Some(ref handler) = handlers[Self::calc_index(packet_id, side, state)] else {
-                return Ok(None);
-            };
-            if handler.own_type != own_type {
-                return Ok(None);
-            };
-            self.lua.registry_value(&handler.key)?
-        };
         let result = func.call_async::<Option<Update>>(options).await?;
         Ok(Some(match (result, own_type) {
             // Returning nothing means "leave the packet alone" and is always allowed.
@@ -271,13 +281,13 @@ impl LuaUserData for Engine {
                 String,
                 bool,
                 Function,
-            )| { 
+            )| {
                 let state = State::try_from(state.as_str()).map_err(LuaError::runtime)?;
                 let side = Side::try_from(side.as_str()).map_err(LuaError::runtime)?;
                 let own_type = OwnType::try_from(own_type.as_str()).map_err(LuaError::runtime)?;
 
-                this.register(state, side, packet, FunctionData { function: func, is_blocking, own_type })
-             },
+                this.register(state, side, packet, func, own_type, is_blocking)
+            },
         );
     }
 }
@@ -285,7 +295,6 @@ impl LuaUserData for Engine {
 pub struct FunctionData {
     pub function: Function,
     pub is_blocking: bool,
-    pub own_type: OwnType,
 }
 
 pub struct HandlerOptions<'a> {
