@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use mlua::{Function, StdLib, prelude::*};
+use mlua::{Function, StdLib, Value::Table, prelude::*};
 use parking_lot::RwLock;
 use tracing::{info, warn};
 
@@ -129,30 +129,8 @@ impl Engine {
         (side_id * 256) + (state_id * 256 * SIDES) + packet_id as usize
     }
 
-    /// Registers a handler for one packet.
-    ///
-    /// `packet` is a constructor from the `s2c` / `c2s` namespaces, e.g.
-    /// `s2c.play.SetEntityMetadata`. The opcode, side and state are read off
-    /// that constructor, so a script never has to hard-code a numeric id:
-    ///
-    /// ```lua
-    /// engine:register("Play", "S2C", s2c.play.SetEntityMetadata, "read", handler)
-    /// ```
-    ///
-    /// The `state` and `side` arguments are still accepted (and checked against
-    /// the constructor) so a typo is reported instead of silently registering
-    /// the handler under the wrong phase. A plain integer is also accepted for
-    /// backwards compatibility.
-    fn register(
-        &self,
-        state: State,
-        side: Side,
-        packet: LuaValue,
-        func: Function,
-        own_type: OwnType,
-        is_blocking: bool,
-    ) -> LuaResult<()> {
-        let packet_id = match packet {
+    pub fn parse_packet_id(state: State, side: Side, packet: LuaValue) -> LuaResult<u8> {
+        Ok(match packet {
             // A constructor table: read the metadata the derive stamped on it.
             LuaValue::Table(ref constructor) => {
                 let opcode: i32 = constructor.get("opcode")?;
@@ -196,14 +174,31 @@ impl Engine {
                     other.type_name()
                 )));
             }
-        };
+        })
+    }
 
-        let key = self.lua.create_registry_value(func)?;
+    /// Registers a handler for one packet.
+    ///
+    /// `packet` is a constructor from the `s2c` / `c2s` namespaces, e.g.
+    /// `s2c.play.SetEntityMetadata`. The opcode, side and state are read off
+    /// that constructor, so a script never has to hard-code a numeric id:
+    ///
+    /// ```lua
+    /// engine:register("Play", "S2C", s2c.play.SetEntityMetadata, "read", handler)
+    /// ```
+    ///
+    /// The `state` and `side` arguments are still accepted (and checked against
+    /// the constructor) so a typo is reported instead of silently registering
+    /// the handler under the wrong phase. A plain integer is also accepted for
+    /// backwards compatibility.
+    fn register(&self, register_options: RegisterOptions) -> LuaResult<()> {
+        let packet_id = Self::parse_packet_id(register_options.state, register_options.side, register_options.packet)?;
+        let key = self.lua.create_registry_value(register_options.function)?;
 
-        self.handlers.write()[Self::calc_index(packet_id, side, state)] = Some(Handler {
+        self.handlers.write()[Self::calc_index(packet_id, register_options.side, register_options.state)] = Some(Handler {
             key,
-            own_type,
-            is_blocking,
+            own_type: register_options.own_type,
+            is_blocking: register_options.is_blocking,
         });
         Ok(())
     }
@@ -273,23 +268,54 @@ impl LuaUserData for Engine {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
         methods.add_method_mut(
             "register",
-            |_lua,
+            |lua,
              this,
-             (state, side, packet, own_type, is_blocking, func): (
-                String,
-                String,
-                LuaValue,
-                String,
-                bool,
-                Function,
-            )| {
-                let state = State::try_from(state.as_str()).map_err(LuaError::runtime)?;
-                let side = Side::try_from(side.as_str()).map_err(LuaError::runtime)?;
-                let own_type = OwnType::try_from(own_type.as_str()).map_err(LuaError::runtime)?;
-
-                this.register(state, side, packet, func, own_type, is_blocking)
+             options: LuaValue| {
+                /*
+                (state, side, packet, own_type, is_blocking, func): (
+                    String,
+                    String,
+                    LuaValue,
+                    String,
+                    bool,
+                    Function,
+                )| {
+                */
+                let register_options = RegisterOptions::from_lua(options, lua)?;
+                this.register(register_options)
             },
         );
+    }
+}
+
+pub struct RegisterOptions {
+    pub state: State,
+    pub side: Side,
+    pub packet: LuaValue,
+    pub own_type: OwnType,
+    pub is_blocking: bool,
+    pub function: Function,
+}
+
+impl FromLua for RegisterOptions {
+    fn from_lua(value: LuaValue, _lua: &Lua) -> LuaResult<Self> {
+        let Table(table) = value else {
+            return Err(LuaError::runtime("Invalid options type, expected Table"));
+        };
+        let state: String = table.get("state")?;
+        let side: String = table.get("side")?;
+        let packet: LuaValue = table.get("packet")?;
+        let own_type: String = table.get("own_type")?;
+        let is_blocking: bool = table.get("is_blocking")?;
+        let function: Function = table.get("function")?;
+        Ok(Self {
+            state: State::try_from(state.as_str()).map_err(|e| LuaError::runtime(e))?,
+            side: Side::try_from(side.as_str()).map_err(|e| LuaError::runtime(e))?,
+            packet,
+            own_type: OwnType::try_from(own_type.as_str()).map_err(|e| LuaError::runtime(e))?,
+            is_blocking,
+            function
+        })
     }
 }
 

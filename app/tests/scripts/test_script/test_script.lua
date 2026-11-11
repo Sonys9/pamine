@@ -5,7 +5,7 @@ local some_file = require("folder.some_file")
 -- Register by packet constructor, not by a numeric opcode. The constructor
 -- carries its own `opcode`, `side` and `state`, so the engine can read them
 -- back and reject a registration that names the wrong phase.
-engine:register("Handshake", "C2S", c2s.handshake.Handshaking, "read-inject", function(opts)
+engine:register("Handshake", "C2S", c2s.handshake.Handshaking, "read-inject", true, function(opts)
     required_file:helper()
     some_file:print()
     print("Got packet and options: ", opts)
