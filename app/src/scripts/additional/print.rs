@@ -18,7 +18,10 @@ impl Engine {
         let print = self.lua.create_function(move |_, values: LuaMultiValue| {
             // Tracing automatically fixes colors in the terminal on Windows, so
             // no manual fix is required here.
-            print!("\x1b[2;90m{} \x1b[0;32m{}\x1b[0m: ", script.uuid, script.name);
+            print!(
+                "\x1b[2;90m{} \x1b[0;32m{}\x1b[0m: ",
+                script.uuid, script.name
+            );
             for value in values {
                 Self::print_value(value, 0)?;
                 print!(" ");

@@ -20,7 +20,6 @@ use pcore::{
 /// The payload of a particle, keyed by its type id.
 use pcore_gen::{Lua, LuaPacket};
 
-
 #[derive(Lua, Debug, Clone)]
 pub enum ParticleData<'a> {
     /// The particle carries no payload.
@@ -180,10 +179,7 @@ pub fn write_particle_data(encoder: &mut Encoder, data: &ParticleData<'_>) {
 /// payload is just the variant's fields. The derive cannot express that, so
 /// this impl writes the fields only.
 impl ParticleData<'_> {
-    pub fn lua_encode_table(
-        table: &mlua::Table,
-        encoder: &mut Encoder,
-    ) -> mlua::Result<()> {
+    pub fn lua_encode_table(table: &mlua::Table, encoder: &mut Encoder) -> mlua::Result<()> {
         let variant: String = table.get("type")?;
         match variant.as_str() {
             "None" => {}

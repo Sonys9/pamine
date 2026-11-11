@@ -179,9 +179,8 @@ impl IntoLua for UpdateBindings {
                 |_, (packet, threshold, changeable): (LuaPacketValue, LuaTable, bool)| {
                     let threshold = threshold_from_lua(&threshold)?;
                     let body = packet.into_body();
-                    let framed = frame_packet(&body, &threshold).map_err(|e| {
-                        LuaError::runtime(format!("failed to frame packet: {e}"))
-                    })?;
+                    let framed = frame_packet(&body, &threshold)
+                        .map_err(|e| LuaError::runtime(format!("failed to frame packet: {e}")))?;
                     Ok(Injection::from_frame(framed, changeable))
                 },
             )?,

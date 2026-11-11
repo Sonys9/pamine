@@ -48,7 +48,10 @@ impl Script {
     /// The Lua source of the script's entry point.
     pub fn main_code(&self) -> eyre::Result<&str> {
         let bytes = self.files.file(&self.main_file, false).ok_or_else(|| {
-            eyre::eyre!("The main file `{}` is missing from the script", self.main_file)
+            eyre::eyre!(
+                "The main file `{}` is missing from the script",
+                self.main_file
+            )
         })?;
         std::str::from_utf8(bytes)
             .map_err(|e| eyre::eyre!("The main file `{}` is not valid UTF-8: {e}", self.main_file))
@@ -57,7 +60,10 @@ impl Script {
     /// Unpacks the tar into a sorted [`ScriptStruct`] tree.
     fn read_archive(script_archive: Vec<u8>) -> eyre::Result<ScriptStruct> {
         let mut archive = Archive::new(Cursor::new(script_archive));
-        let mut root = ScriptStruct::Folder { name: String::new(), content: Vec::new() };
+        let mut root = ScriptStruct::Folder {
+            name: String::new(),
+            content: Vec::new(),
+        };
 
         for entry in archive.entries()? {
             let mut entry = entry?;
@@ -119,6 +125,9 @@ impl Script {
             return Ok(content.into_iter().next().expect("length checked above"));
         }
 
-        Ok(ScriptStruct::Folder { name: String::new(), content })
+        Ok(ScriptStruct::Folder {
+            name: String::new(),
+            content,
+        })
     }
 }

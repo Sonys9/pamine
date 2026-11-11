@@ -10,7 +10,6 @@ use pcore::{
 /// The `action`-dependent body of [`BossBar`].
 use pcore_gen::{Lua, LuaPacket};
 
-
 #[derive(Lua, LuaPacket, Debug, Clone)]
 #[lua(tag)]
 pub enum BossBarAction<'a> {

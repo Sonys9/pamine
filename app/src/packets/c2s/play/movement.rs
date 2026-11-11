@@ -3,7 +3,6 @@
 use pcore::{Decode, decoder::VarInt};
 use pcore_gen::{Encode, Lua, LuaPacket};
 
-
 #[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct ConfirmTeleportation {
     pub teleport_id: VarInt,

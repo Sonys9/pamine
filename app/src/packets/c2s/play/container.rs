@@ -9,7 +9,6 @@ use pcore::{
 
 use pcore_gen::{Lua, LuaPacket};
 
-
 #[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct ClickContainerButton {
     pub window_id: i8,
@@ -33,10 +32,7 @@ pub struct ClickContainer<'a> {
 /// `lua_encode_table` of its own. Each entry is read as a two-element Lua
 /// sequence `{ slot_number, slot }`.
 impl ClickContainer<'_> {
-    pub fn lua_encode_table(
-        table: &mlua::Table,
-        encoder: &mut Encoder,
-    ) -> mlua::Result<()> {
+    pub fn lua_encode_table(table: &mlua::Table, encoder: &mut Encoder) -> mlua::Result<()> {
         encoder.u8(table.get::<u8>("window_id")?);
         encoder.varint(table.get::<i32>("state_id")?);
         encoder.i16(table.get::<i16>("slot")?);

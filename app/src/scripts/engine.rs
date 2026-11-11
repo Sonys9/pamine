@@ -144,15 +144,11 @@ impl Engine {
     /// backwards compatibility.
     fn register(
         &self,
-        state: &str,
-        side: &str,
+        state: State,
+        side: Side,
         packet: LuaValue,
-        own_type: String,
-        func: Function,
+        function_data: FunctionData,
     ) -> LuaResult<()> {
-        let state = State::try_from(state).map_err(LuaError::runtime)?;
-        let side = Side::try_from(side).map_err(LuaError::runtime)?;
-
         let packet_id = match packet {
             // A constructor table: read the metadata the derive stamped on it.
             LuaValue::Table(ref constructor) => {
@@ -199,12 +195,15 @@ impl Engine {
             }
         };
 
-        let key = self.lua.create_registry_value(func)?;
-        let own_type = OwnType::try_from(own_type.as_str()).map_err(LuaError::external)?;
+        let key = self.lua.create_registry_value(function_data.function)?;
 
         self.handlers.lock().unwrap()[Self::calc_index(packet_id, side, state)] =
-            Some(Handler { key, own_type });
+            Some(Handler { key, own_type: function_data.own_type, is_blocking: function_data.is_blocking });
         Ok(())
+    }
+
+    pub fn get_func(packet_id: u8, state: State, side: Side) -> FunctionData {
+        todo!()
     }
 
     pub async fn on_packet(
@@ -265,15 +264,28 @@ impl LuaUserData for Engine {
             "register",
             |_lua,
              this,
-             (state, side, packet, own_type, func): (
+             (state, side, packet, own_type, is_blocking, func): (
                 String,
                 String,
                 LuaValue,
                 String,
+                bool,
                 Function,
-            )| { this.register(&state, &side, packet, own_type, func) },
+            )| { 
+                let state = State::try_from(state.as_str()).map_err(LuaError::runtime)?;
+                let side = Side::try_from(side.as_str()).map_err(LuaError::runtime)?;
+                let own_type = OwnType::try_from(own_type.as_str()).map_err(LuaError::runtime)?;
+
+                this.register(state, side, packet, FunctionData { function: func, is_blocking, own_type })
+             },
         );
     }
+}
+
+pub struct FunctionData {
+    pub function: Function,
+    pub is_blocking: bool,
+    pub own_type: OwnType,
 }
 
 pub struct HandlerOptions<'a> {
@@ -306,4 +318,5 @@ impl IntoLua for HandlerOptions<'_> {
 pub struct Handler {
     key: LuaRegistryKey,
     own_type: OwnType,
+    is_blocking: bool,
 }

@@ -16,7 +16,6 @@ use crate::packets::{counted, optional_chat};
 
 use pcore_gen::{Lua, LuaPacket};
 
-
 #[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct SpawnEntity {
     pub entity_id: VarInt,

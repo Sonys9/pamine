@@ -12,7 +12,6 @@ use crate::packets::{counted, identifiers};
 /// One advancement's progress.
 use pcore_gen::{Lua, LuaPacket};
 
-
 #[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct AdvancementProgress<'a> {
     pub id: &'a str,
@@ -313,10 +312,7 @@ pub enum RecipeData<'a> {
 /// leading tag — the type string lives in the enclosing [`Recipe`]. The derive
 /// cannot express that, so this impl writes the fields only.
 impl RecipeData<'_> {
-    pub fn lua_encode_table(
-        table: &mlua::Table,
-        encoder: &mut Encoder,
-    ) -> mlua::Result<()> {
+    pub fn lua_encode_table(table: &mlua::Table, encoder: &mut Encoder) -> mlua::Result<()> {
         let variant: String = table.get("type")?;
         match variant.as_str() {
             "Shapeless" => {

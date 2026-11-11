@@ -20,7 +20,10 @@ fn reads_the_manifest() {
     assert_eq!(script.description, "Just a test script");
     assert_eq!(script.engine_version, 1);
     assert_eq!(script.main_file, "test_script.lua");
-    assert_eq!(script.uuid.to_string(), "dafe77bb-e1d5-4560-b473-288676192212");
+    assert_eq!(
+        script.uuid.to_string(),
+        "dafe77bb-e1d5-4560-b473-288676192212"
+    );
 }
 
 #[test]

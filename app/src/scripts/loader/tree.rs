@@ -9,8 +9,14 @@ use std::{
 /// determined by the folders it is nested in.
 #[derive(Debug, Clone)]
 pub enum ScriptStruct {
-    Folder { name: String, content: Vec<ScriptStruct> },
-    File { name: String, content: Vec<u8> },
+    Folder {
+        name: String,
+        content: Vec<ScriptStruct>,
+    },
+    File {
+        name: String,
+        content: Vec<u8>,
+    },
 }
 
 impl ScriptStruct {
@@ -41,10 +47,14 @@ impl ScriptStruct {
     pub fn get(&self, path: impl AsRef<Path>) -> Option<&ScriptStruct> {
         let mut current = self;
         for component in path.as_ref().components() {
-            let Component::Normal(part) = component else { continue };
+            let Component::Normal(part) = component else {
+                continue;
+            };
             let part = part.to_string_lossy();
             let children = current.as_folder()?;
-            current = children.iter().find(|child| child.name() == part.as_ref())?;
+            current = children
+                .iter()
+                .find(|child| child.name() == part.as_ref())?;
         }
         Some(current)
     }
@@ -57,7 +67,9 @@ impl ScriptStruct {
     pub fn get_file(&self, path: impl AsRef<Path>, is_lua: bool) -> Option<&ScriptStruct> {
         let mut current = self;
         for component in path.as_ref().components() {
-            let Component::Normal(part) = component else { continue };
+            let Component::Normal(part) = component else {
+                continue;
+            };
             let part = part.to_string_lossy();
             let children = current.as_folder()?;
             current = children.iter().find(|child| match child {
@@ -92,7 +104,10 @@ impl ScriptStruct {
         let Some((name, rest)) = components.split_first() else {
             return Ok(());
         };
-        let ScriptStruct::Folder { content: children, .. } = self else {
+        let ScriptStruct::Folder {
+            content: children, ..
+        } = self
+        else {
             eyre::bail!("Cannot insert `{name}` into a file");
         };
 
@@ -102,15 +117,23 @@ impl ScriptStruct {
                     eyre::bail!("`{name}` is both a file and a directory in the script archive");
                 }
                 if !Self::has_folder(children, name) {
-                    children.push(ScriptStruct::Folder { name: name.clone(), content: Vec::new() });
+                    children.push(ScriptStruct::Folder {
+                        name: name.clone(),
+                        content: Vec::new(),
+                    });
                 }
             } else {
                 if Self::has_folder(children, name) {
                     eyre::bail!("`{name}` is both a file and a directory in the script archive");
                 }
                 // A later entry wins, which matches how tar extraction behaves.
-                children.retain(|child| !matches!(child, ScriptStruct::File { name: n, .. } if n == name));
-                children.push(ScriptStruct::File { name: name.clone(), content });
+                children.retain(
+                    |child| !matches!(child, ScriptStruct::File { name: n, .. } if n == name),
+                );
+                children.push(ScriptStruct::File {
+                    name: name.clone(),
+                    content,
+                });
             }
             return Ok(());
         }
@@ -124,7 +147,10 @@ impl ScriptStruct {
                 if Self::has_file(children, name) {
                     eyre::bail!("`{name}` is both a file and a directory in the script archive");
                 }
-                children.push(ScriptStruct::Folder { name: name.clone(), content: Vec::new() });
+                children.push(ScriptStruct::Folder {
+                    name: name.clone(),
+                    content: Vec::new(),
+                });
                 children.len() - 1
             }
         };
@@ -134,9 +160,13 @@ impl ScriptStruct {
     /// Sorts the tree so the result is deterministic regardless of the order
     /// the entries happened to be stored in the archive.
     pub(super) fn sort(&mut self) {
-        let ScriptStruct::Folder { content, .. } = self else { return };
+        let ScriptStruct::Folder { content, .. } = self else {
+            return;
+        };
         content.sort_by(|a, b| match (a, b) {
-            (ScriptStruct::Folder { name: a, .. }, ScriptStruct::Folder { name: b, .. }) => a.cmp(b),
+            (ScriptStruct::Folder { name: a, .. }, ScriptStruct::Folder { name: b, .. }) => {
+                a.cmp(b)
+            }
             (ScriptStruct::Folder { .. }, ScriptStruct::File { .. }) => Ordering::Less,
             (ScriptStruct::File { .. }, ScriptStruct::Folder { .. }) => Ordering::Greater,
             (ScriptStruct::File { name: a, .. }, ScriptStruct::File { name: b, .. }) => a.cmp(b),

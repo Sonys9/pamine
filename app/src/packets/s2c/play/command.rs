@@ -15,7 +15,6 @@ use crate::{
 /// One entry of a tab-completion response.
 use pcore_gen::{Lua, LuaPacket};
 
-
 #[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct SuggestionMatch<'a> {
     pub text: &'a str,
@@ -121,10 +120,7 @@ pub enum CommandParser<'a> {
 /// id — the parser id lives in the enclosing [`CommandNode`]. The derive cannot
 /// express that, so this impl writes the properties only.
 impl CommandParser<'_> {
-    pub fn lua_encode_table(
-        table: &mlua::Table,
-        encoder: &mut Encoder,
-    ) -> mlua::Result<()> {
+    pub fn lua_encode_table(table: &mlua::Table, encoder: &mut Encoder) -> mlua::Result<()> {
         let variant: String = table.get("type")?;
         match variant.as_str() {
             "None" => {}

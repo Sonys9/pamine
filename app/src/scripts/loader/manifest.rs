@@ -20,8 +20,8 @@ impl ScriptMeta {
             .ok_or_else(|| eyre::eyre!("The script archive has no `Script.toml` in its root"))?;
         let raw = std::str::from_utf8(raw)
             .map_err(|e| eyre::eyre!("`Script.toml` is not valid UTF-8: {e}"))?;
-        let document: toml::Table = toml::from_str(raw)
-            .map_err(|e| eyre::eyre!("Failed to parse `Script.toml`: {e}"))?;
+        let document: toml::Table =
+            toml::from_str(raw).map_err(|e| eyre::eyre!("Failed to parse `Script.toml`: {e}"))?;
 
         let script = document
             .get("script")

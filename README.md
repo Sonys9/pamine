@@ -214,8 +214,6 @@ Handlers that `sleep` or otherwise await should not stall the packet pipeline.
 - [ ] Add `is_blocking: bool` to the registration table (see item 3).
 - [ ] `is_blocking = true` — the handler is synchronous; run it inline, no task spawn.
 - [ ] `is_blocking = false` — the handler may await; run it on a task and define the ordering guarantees for its `Update`.
-- [ ] Document the trade-off: a non-blocking handler cannot delay the packet it is handling, so `change_with` from it needs a defined semantic (likely: not allowed, or applied to a later packet).
-- [ ] Reject `is_blocking = false` combined with `change_with` if the ordering cannot be guaranteed.
 - [ ] Add tests for both paths, including a handler that sleeps.
 
 ### 3. Pass registration info as a table

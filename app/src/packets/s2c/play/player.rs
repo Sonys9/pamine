@@ -15,7 +15,6 @@ use crate::packets::{counted, optional_chat};
 /// express it.
 use pcore_gen::{Lua, LuaPacket};
 
-
 #[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct AwardStatistics {
     pub statistics: Vec<Statistic>,

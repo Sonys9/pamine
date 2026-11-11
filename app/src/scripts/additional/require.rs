@@ -28,9 +28,7 @@ impl Engine {
             let code = Self::find_script(&mut module, &script)?;
             let result: LuaValue = lua.load(code).set_name(&module).eval()?;
             let key = lua.create_registry_value(result.clone())?;
-            cache.lock()
-                .unwrap()
-                .insert(module, key);
+            cache.lock().unwrap().insert(module, key);
             Ok(result)
         })?;
 
@@ -56,6 +54,6 @@ impl Engine {
             if *byte == b'.' {
                 *byte = b'/';
             };
-        };
+        }
     }
 }

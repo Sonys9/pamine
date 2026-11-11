@@ -6,7 +6,6 @@ use pcore::{
 };
 use pcore_gen::{Encode, Lua, LuaPacket};
 
-
 #[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct QueryBlockEntityTag {
     pub transaction_id: VarInt,

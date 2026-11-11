@@ -11,7 +11,6 @@ use crate::packets::counted;
 
 use pcore_gen::{Lua, LuaPacket};
 
-
 #[derive(Decode, Encode, Lua, LuaPacket, Debug, Clone)]
 pub struct AcknowledgeBlockChange {
     pub sequence_id: VarInt,

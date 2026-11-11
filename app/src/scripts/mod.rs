@@ -15,9 +15,9 @@
 //! - [`additional`] — small globals (`print`, `sleep`, `require`)
 
 pub mod adaptations;
+mod additional;
 pub mod engine;
 pub mod loader;
-mod additional;
 mod own_type;
 
 pub use engine::{Engine, HandlerOptions};

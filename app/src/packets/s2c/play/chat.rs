@@ -16,7 +16,6 @@ use crate::packets::{counted, optional_bytes, optional_chat};
 /// boolean).
 use pcore_gen::{Lua, LuaPacket};
 
-
 #[derive(Lua, LuaPacket, Debug, Clone)]
 pub struct ChatPreview<'a> {
     pub query_id: i32,
