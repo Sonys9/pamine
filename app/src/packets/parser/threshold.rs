@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::{Arc, atomic::{AtomicBool, AtomicI32, Ordering}};
 
 /// The compression threshold, which is `None` until `Set Compression` arrives.
 ///
@@ -8,9 +8,12 @@ use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 /// to see the matching `value`. Storing `exists` first would let a reader see
 /// `true` with a stale `value` of `0`, which would make it treat an
 /// uncompressed packet as compressed and desynchronise the stream.
+/// 
+/// Arc<..> is for Clone
+#[derive(Debug, Clone)]
 pub struct UnsureThreshold {
-    pub value: AtomicI32,
-    pub exists: AtomicBool,
+    pub value: Arc<AtomicI32>,
+    pub exists: Arc<AtomicBool>,
 }
 
 impl Default for UnsureThreshold {
@@ -22,8 +25,8 @@ impl Default for UnsureThreshold {
 impl UnsureThreshold {
     pub fn new() -> Self {
         Self {
-            value: AtomicI32::new(0),
-            exists: AtomicBool::new(false),
+            value: Arc::new(AtomicI32::new(0)),
+            exists: Arc::new(AtomicBool::new(false)),
         }
     }
 

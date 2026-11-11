@@ -211,7 +211,7 @@ does not call it.
 
 Handlers that `sleep` or otherwise await should not stall the packet pipeline.
 
-- [ ] Add `is_blocking: bool` to the registration table (see item 3).
+- [x] Add `is_blocking: bool` to the registration table (see item 3).
 - [ ] `is_blocking = true` — the handler is synchronous; run it inline, no task spawn.
 - [ ] `is_blocking = false` — the handler may await; run it on a task and define the ordering guarantees for its `Update`.
 - [ ] Add tests for both paths, including a handler that sleeps.

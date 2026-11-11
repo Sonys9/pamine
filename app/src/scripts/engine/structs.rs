@@ -1,28 +1,16 @@
 use mlua::{Function, Value::Table, prelude::*};
 
-use crate::{packets::{Packet, Side, State, UnsureThreshold}, scripts::{Engine, OwnType}};
+use crate::{
+    packets::{Packet, Side, State, UnsureThreshold},
+    scripts::{Engine, OwnType},
+};
 
 impl LuaUserData for Engine {
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
-        methods.add_method_mut(
-            "register",
-            |lua,
-             this,
-             options: LuaValue| {
-                /*
-                (state, side, packet, own_type, is_blocking, func): (
-                    String,
-                    String,
-                    LuaValue,
-                    String,
-                    bool,
-                    Function,
-                )| {
-                */
-                let register_options = RegisterOptions::from_lua(options, lua)?;
-                this.register(register_options)
-            },
-        );
+        methods.add_method_mut("register", |lua, this, options: LuaValue| {
+            let register_options = RegisterOptions::from_lua(options, lua)?;
+            this.register(register_options)
+        });
     }
 }
 
@@ -52,7 +40,7 @@ impl FromLua for RegisterOptions {
             packet,
             own_type: OwnType::try_from(own_type.as_str()).map_err(|e| LuaError::runtime(e))?,
             is_blocking,
-            function
+            function,
         })
     }
 }
@@ -62,14 +50,15 @@ pub struct FunctionData {
     pub is_blocking: bool,
 }
 
+#[derive(Debug, Clone)]
 pub struct HandlerOptions<'a> {
     pub packet: &'a Packet<'a>,
-    pub threshold: &'a UnsureThreshold,
+    pub threshold: UnsureThreshold,
     pub is_injected: bool,
 }
 
 impl<'a> HandlerOptions<'a> {
-    pub fn new(packet: &'a Packet<'a>, threshold: &'a UnsureThreshold, is_injected: bool) -> Self {
+    pub fn new(packet: &'a Packet, threshold: UnsureThreshold, is_injected: bool) -> Self {
         Self {
             packet,
             threshold,
@@ -82,7 +71,7 @@ impl IntoLua for HandlerOptions<'_> {
     fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
         let table = lua.create_table()?;
         table.set("packet", self.packet)?;
-        table.set("threshold", self.threshold)?;
+        table.set("threshold", &self.threshold)?;
         table.set("is_injected", self.is_injected)?;
         Ok(LuaValue::Table(table))
     }

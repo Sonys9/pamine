@@ -1,6 +1,10 @@
 use mlua::prelude::*;
 
-use crate::{packets::{Side, State}, scripts::{Engine, OwnType, engine::{FunctionData, SIDES}}};
+use crate::{
+    packets::{Side, State}, scripts::{
+        Engine, OwnType, engine::{FunctionData, SIDES},
+    },
+};
 
 impl Engine {
     pub fn calc_index(packet_id: u8, side: Side, state: State) -> usize {
@@ -55,6 +59,14 @@ impl Engine {
                 )));
             }
         })
+    }
+
+    pub fn own_type(&self, packet_id: u8, state: State, side: Side) -> Option<OwnType> {
+        let handlers = self.handlers.read();
+        let Some(ref handler) = handlers[Self::calc_index(packet_id, side, state)] else {
+            return None;
+        };
+        Some(handler.own_type)
     }
 
     pub fn get_func(

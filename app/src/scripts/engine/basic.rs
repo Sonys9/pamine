@@ -1,10 +1,18 @@
 use std::sync::Arc;
 
-use mlua::{prelude::*, StdLib, Function};
+use mlua::{Function, StdLib, prelude::*};
 use parking_lot::RwLock;
 use tracing::{info, warn};
 
-use crate::{connections::Update, packets::Side, scripts::{HandlerOptions, OwnType, Script, adaptations::{NbtBindings, UpdateBindings}, engine::{ENGINE_VERSION, Handler, RegisterOptions, SIDES, STATES, packet_bindings}}};
+use crate::{
+    connections::Update,
+    packets::Side,
+    scripts::{
+        HandlerOptions, OwnType, Script,
+        adaptations::{NbtBindings, UpdateBindings},
+        engine::{ENGINE_VERSION, Handler, RegisterOptions, SIDES, STATES, packet_bindings},
+    },
+};
 
 // Cheap to copy because Lua is Arc + bool
 #[derive(Debug, Clone)]
@@ -12,7 +20,7 @@ pub struct Engine {
     pub(crate) handlers: Arc<RwLock<[Option<Handler>; 256 * SIDES * STATES]>>, // There is 2 sides and 4 states
     pub(crate) lua: Lua,
     pub(crate) script: Arc<Script>, // Arc<..> because Script is heavy
-} 
+}
 
 impl Engine {
     pub fn new(script: Arc<Script>) -> LuaResult<Self> {
@@ -120,14 +128,20 @@ impl Engine {
     /// the handler under the wrong phase. A plain integer is also accepted for
     /// backwards compatibility.
     pub fn register(&self, register_options: RegisterOptions) -> LuaResult<()> {
-        let packet_id = Self::parse_packet_id(register_options.state, register_options.side, register_options.packet)?;
+        let packet_id = Self::parse_packet_id(
+            register_options.state,
+            register_options.side,
+            register_options.packet,
+        )?;
         let key = self.lua.create_registry_value(register_options.function)?;
 
-        self.handlers.write()[Self::calc_index(packet_id, register_options.side, register_options.state)] = Some(Handler {
-            key,
-            own_type: register_options.own_type,
-            is_blocking: register_options.is_blocking,
-        });
+        self.handlers.write()
+            [Self::calc_index(packet_id, register_options.side, register_options.state)] =
+            Some(Handler {
+                key,
+                own_type: register_options.own_type,
+                is_blocking: register_options.is_blocking,
+            });
         Ok(())
     }
 }

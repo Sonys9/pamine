@@ -1,15 +1,12 @@
-use std::{env, net::SocketAddr, sync::Arc, time::Duration};
+use std::{env, mem::transmute, net::SocketAddr, sync::Arc, time::Duration};
 
 use tokio::net::TcpListener;
 use tracing::{error, info};
 
 use crate::{
-    connections::Connector,
-    packets::{
-        Packet, UnsureThreshold,
-        c2s::{self, packets::C2SPacket},
-    },
-    scripts::{Engine, HandlerOptions, OwnType, Script},
+    connections::Connector, packets::{
+        Packet, Side, State, UnsureThreshold, c2s::{self, packets::C2SPacket},
+    }, scripts::{Engine, HandlerOptions, OwnType, Script},
 };
 
 mod buffer;
@@ -80,25 +77,51 @@ async fn scripting_stuff() {
     let packet = Packet::C2S(C2SPacket::Status(c2s::status::Status::PingRequest(
         c2s::status::PingRequest { payload: 42 },
     )));
+    let Some(own_type) = engine.own_type(0, packets::State::Handshake, packets::Side::C2S) else {
+        panic!("Packet handler is not yet registered");
+    };
+    let packet = packet.to_owned();
+    handle_packet(
+        &engine,
+        packets::State::Handshake,
+        packets::Side::C2S,
+        &packet,
+        &threshold,
+        0,
+        own_type
+    ).await;
+
+    tokio::time::sleep(Duration::from_millis(400)).await; // And till it handles it
+}
+
+async fn handle_packet<'a>(engine: &Engine, state: State, side: Side, packet: &'a Packet<'static>, threshold: &'a UnsureThreshold, packet_id: u8, own_type: OwnType) {
     let func_data = engine
         .get_func(
-            0,
-            packets::State::Handshake,
-            packets::Side::C2S,
-            OwnType::ReadInject,
+            packet_id,
+            state,
+            side,
+            own_type,
         )
         .unwrap()
         .unwrap();
-    let result_packet_0 = engine
-        .on_packet(
-            func_data.function,
-            OwnType::ReadInject,
-            0,
-            HandlerOptions::new(&packet, &threshold, true),
-        )
-        .await
-        .unwrap();
-    info!("Result with packet 0: {:?}", result_packet_0);
 
-    tokio::time::sleep(Duration::from_millis(400)).await; // And till it handles it
+    let packet_join_handler = tokio::spawn({
+        let engine = engine.clone();
+        let threshold = threshold.clone();
+        let packet = packet.clone();
+
+        async move {
+            let result = engine.on_packet(
+                func_data.function,
+                OwnType::ReadInject,
+                0,
+                HandlerOptions::new(&packet, threshold, false),
+            ).await;
+            info!("Result with packet 0: {:?}", result.unwrap());
+        }
+    });
+    
+    if func_data.is_blocking {
+        packet_join_handler.await.unwrap();
+    };
 }
