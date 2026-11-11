@@ -15,7 +15,7 @@ engine:register({
     required_file:helper()
     some_file:print()
     print("Got packet and options: ", opts)
-    print("Registered packet: ", c2s.handshake.Handshaking.name, c2s.handshake.Handshaking.opcode)
+    print("Registered packet:", c2s.handshake.Handshaking.name, c2s.handshake.Handshaking.opcode)
     print(s2c.play.SetEntityMetadata)
 
     -- Correct pair: particle_id 24 (dust) with Dust payload.

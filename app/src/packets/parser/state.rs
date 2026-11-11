@@ -180,3 +180,17 @@ pub enum Packet<'a> {
     C2S(C2SPacket<'a>),
     S2C(S2CPacket<'a>),
 }
+
+impl Packet<'_> {
+    /// The wire opcode of the wrapped packet, taken from its `#[id(N)]`.
+    ///
+    /// This is the single entry point a caller needs: it walks the direction
+    /// and phase layers and returns the same value `Encode` writes as the first
+    /// VarInt of the packet.
+    pub fn opcode(&self) -> i32 {
+        match self {
+            Self::C2S(packet) => packet.opcode(),
+            Self::S2C(packet) => packet.opcode(),
+        }
+    }
+}

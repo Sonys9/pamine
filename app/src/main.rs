@@ -1,11 +1,12 @@
 use std::{env, mem::transmute, net::SocketAddr, sync::Arc, time::Duration};
 
+use pcore::decoder::VarInt;
 use tokio::net::TcpListener;
 use tracing::{error, info};
 
 use crate::{
     connections::Connector, packets::{
-        Packet, Side, State, UnsureThreshold, c2s::{self, packets::C2SPacket},
+        Packet, Side, State, UnsureThreshold, c2s::{self, handshake::Handshaking, packets::C2SPacket},
     }, scripts::{Engine, HandlerOptions, OwnType, Script, ScriptData, ScriptStorage},
 };
 
@@ -62,18 +63,15 @@ async fn main() {
 async fn scripting_stuff() {
     let mut script_storage = ScriptStorage::default();
     let first_script = Arc::new(new_script());
-    let second_script = Arc::new(new_script());
     script_storage.insert(first_script.clone()).unwrap();
-    script_storage.insert(second_script.clone()).unwrap();
-    // should crash because they have the same UUID
 
     let threshold = UnsureThreshold::new();
     threshold.set(256);
     tokio::time::sleep(Duration::from_millis(200)).await; // Wait till it loads
-    let packet = Packet::C2S(C2SPacket::Status(c2s::status::Status::PingRequest(
-        c2s::status::PingRequest { payload: 42 },
+    let packet = Packet::C2S(C2SPacket::Handshake(c2s::handshake::Handshake::Handshaking(
+        Handshaking { protocol: VarInt::new(760), address: "mc.server.com", port: 25565, next_state: VarInt::new(1) }
     )));
-    let Some(own_type) = first_script.engine.own_type(0, packets::State::Handshake, packets::Side::C2S) else {
+    let Some(own_type) = first_script.engine.own_type(packet.opcode(), packets::State::Handshake, packets::Side::C2S) else {
         panic!("Packet handler is not yet registered");
     };
     let packet = packet.to_owned();

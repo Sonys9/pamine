@@ -3,13 +3,20 @@
 use pcore::{Decode, encode, encoder::varint};
 
 use super::{
-    Parsed, Parser, Side, State, UnsureThreshold,
+    Packet, Parsed, Parser, Side, State, UnsureThreshold,
     frame::{Frame, MAX_PACKET_LEN, deflate, inflate},
     frame_packet,
 };
 use crate::{
     connections::meta::Meta,
-    packets::c2s::play::{ChatCommand, ChatMessage, Play},
+    packets::{
+        c2s::{
+            handshake::{Handshake, Handshaking},
+            packets::C2SPacket,
+            play::{ChatCommand, ChatMessage, Play},
+        },
+        s2c::packets::S2CPacket,
+    },
 };
 
 /// Builds an uncompressed frame: `len:VarInt body`.
@@ -517,4 +524,45 @@ fn spoofed_chat_message_survives_a_full_parse_round_trip() {
         }
     }
     assert!(c2s.stream_data.is_empty());
+}
+
+#[test]
+fn packet_exposes_the_opcode_of_a_c2s_handshake() {
+    // The whole direction/phase chain must forward `opcode()` down to the
+    // variant's `#[id(N)]`, so a caller never has to match the layers by hand.
+    let packet = Packet::C2S(C2SPacket::Handshake(Handshake::Handshaking(
+        Handshaking {
+            protocol: pcore::decoder::VarInt::new(760),
+            address: "mc.server.com",
+            port: 25565,
+            next_state: pcore::decoder::VarInt::new(1),
+        },
+    )));
+
+    assert_eq!(packet.opcode(), 0x00);
+}
+
+#[test]
+fn packet_opcode_agrees_with_the_encoded_first_varint() {
+    // `opcode()` is only useful if it is the same value `Encode` writes, so
+    // compare it against the first VarInt of the encoded body for both sides.
+    let c2s_play = Play::ChatMessage(chat_message("hi"));
+    let s2c_status = crate::packets::s2c::status::Status::PingResponse(
+        crate::packets::s2c::status::PingResponse { payload: 7 },
+    );
+
+    let c2s = Packet::C2S(C2SPacket::Play(c2s_play.clone()));
+    let s2c = Packet::S2C(S2CPacket::Status(s2c_status.clone()));
+
+    for (packet, inner) in [
+        (&c2s, encode(&c2s_play)),
+        (&s2c, encode(&s2c_status)),
+    ] {
+        let mut decoder = pcore::decoder::Decoder::new(&inner);
+        let written = decoder.varint().unwrap().get();
+        assert_eq!(written, packet.opcode(), "opcode() disagrees with Encode");
+    }
+
+    assert_eq!(c2s.opcode(), 0x05);
+    assert_eq!(s2c.opcode(), 0x01);
 }
