@@ -54,3 +54,31 @@ fn exposes_the_main_source() {
     let script = test_script();
     assert!(script.main_code().unwrap().contains("engine:register"));
 }
+
+/// `changeable` is the one `Injection` field a script may write.
+///
+/// Without a setter mlua installs no `__newindex`, so the assignment fails with
+/// "attempt to index ... (a userdata value)" and the flag silently stays as it
+/// was. The other fields must stay read-only.
+#[test]
+fn lua_can_flip_the_changeable_flag() {
+    use mlua::prelude::*;
+
+    let lua = Lua::new();
+    lua.globals()
+        .set("inject", crate::connections::Injection::empty(true))
+        .unwrap();
+
+    assert!(lua.load("return inject.changeable").eval::<bool>().unwrap());
+
+    lua.load("inject.changeable = false").exec().unwrap();
+    assert!(!lua.load("return inject.changeable").eval::<bool>().unwrap());
+
+    // The write reached the Rust value, not just a Lua-side shadow.
+    let userdata: LuaAnyUserData = lua.globals().get("inject").unwrap();
+    assert!(!userdata.borrow::<crate::connections::Injection>().unwrap().changeable);
+
+    // Read-only fields still reject an assignment.
+    assert!(lua.load("inject.depth = 5").exec().is_err());
+    assert!(lua.load("inject.len = 5").exec().is_err());
+}

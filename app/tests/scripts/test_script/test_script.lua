@@ -35,6 +35,7 @@ engine:register({
     print("Valid particle opcode: ", ok.opcode)
 
     local inject = update.injection(true)
+    inject.changeable = false;
     inject:push_packet(ok, opts.threshold)
     print("Valid injection len: ", inject.len)
 

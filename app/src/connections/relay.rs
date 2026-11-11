@@ -16,12 +16,12 @@
 
 use std::{borrow::Cow, net::SocketAddr, sync::Arc};
 
+use parking_lot::RwLock;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tracing::error;
 
 use crate::{
-    connections::{Channel, Injection, Stream, meta::Meta, rewrite},
-    packets::{Parsed, Parser, Side},
+    connections::{Channel, Injection, Stream, meta::Meta, rewrite}, packets::{Parsed, Parser, Side}, scripts::ScriptStorage,
 };
 
 /// Relays one direction of the connection until either side closes.
@@ -36,6 +36,7 @@ pub async fn connection_side(
     parser: Arc<Parser>,
     mut meta: Meta,
     mut channel: Channel,
+    script_storage: Arc<RwLock<ScriptStorage>>,
 ) -> eyre::Result<()> {
     let target_addr = stream.tx.local_addr()?;
     let client_addr = stream.rx.local_addr()?;

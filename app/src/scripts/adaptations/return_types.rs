@@ -2,10 +2,11 @@
 //!
 //! Scripts see two things:
 //!
-//! - `Injection` as a userdata with read-only fields (`changeable`, `depth`,
-//!   `bytes`, `len`) and a few methods (`is_empty`, `is_exhausted`,
-//!   `push_frame`, `clear`). `bytes` is exposed as a Lua string, not as a
-//!   sequence table, so binary frames survive the round trip unchanged.
+//! - `Injection` as a userdata with one writable field (`changeable`) and
+//!   read-only ones (`depth`, `bytes`, `len`), plus a few methods (`is_empty`,
+//!   `is_exhausted`, `push_frame`, `clear`). `bytes` is exposed as a Lua
+//!   string, not as a sequence table, so binary frames survive the round trip
+//!   unchanged.
 //! - `update` as a plain table of constructors (`none`, `change`, `inject`,
 //!   `both`, `injection`). It is a table rather than a userdata on purpose:
 //!   `update.both(a, b)` cannot accidentally pass `update` as `self`, which is
@@ -87,6 +88,15 @@ impl FromLua for Injection {
 impl LuaUserData for Injection {
     fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
         fields.add_field_method_get("changeable", |_, this| Ok(this.changeable));
+        // `changeable` is the one field a script may flip: it decides whether
+        // the injection is fed back through the rewrite hook. Without a setter
+        // an assignment would fail with "attempt to index ... (a userdata
+        // value)", because mlua only installs `__newindex` when at least one
+        // setter exists.
+        fields.add_field_method_set("changeable", |_, this, value: bool| {
+            this.changeable = value;
+            Ok(())
+        });
         fields.add_field_method_get("depth", |_, this| Ok(this.depth));
         fields.add_field_method_get("len", |_, this| Ok(this.bytes.len()));
         // A Lua string keeps arbitrary bytes intact; a `Vec<u8>` would become a

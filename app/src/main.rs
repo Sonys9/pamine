@@ -71,7 +71,7 @@ async fn scripting_stuff() {
     let packet = Packet::C2S(C2SPacket::Handshake(c2s::handshake::Handshake::Handshaking(
         Handshaking { protocol: VarInt::new(760), address: "mc.server.com", port: 25565, next_state: VarInt::new(1) }
     )));
-    let Some(own_type) = first_script.engine.own_type(packet.opcode(), packets::State::Handshake, packets::Side::C2S) else {
+    let Some(own_type) = first_script.engine.own_type(packet.opcode() as u8, packets::State::Handshake, packets::Side::C2S) else {
         panic!("Packet handler is not yet registered");
     };
     let packet = packet.to_owned();
@@ -81,17 +81,16 @@ async fn scripting_stuff() {
         packets::Side::C2S,
         &packet,
         &threshold,
-        0,
         own_type
     ).await;
 
     tokio::time::sleep(Duration::from_millis(400)).await; // And till it handles it
 }
 
-async fn handle_packet<'a>(engine: &Engine, state: State, side: Side, packet: &'a Packet<'static>, threshold: &'a UnsureThreshold, packet_id: u8, own_type: OwnType) {
+async fn handle_packet<'a>(engine: &Engine, state: State, side: Side, packet: &'a Packet<'static>, threshold: &'a UnsureThreshold, own_type: OwnType) {
     let func_data = engine
         .get_func(
-            packet_id,
+            packet.opcode() as u8,
             state,
             side,
             own_type,
@@ -108,7 +107,7 @@ async fn handle_packet<'a>(engine: &Engine, state: State, side: Side, packet: &'
             let result = engine.on_packet(
                 func_data.function,
                 OwnType::ReadInject,
-                0,
+                packet.opcode() as u8,
                 HandlerOptions::new(&packet, threshold, false),
             ).await;
             info!("Result with packet 0: {:?}", result.unwrap());

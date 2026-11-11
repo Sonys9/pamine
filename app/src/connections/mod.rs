@@ -20,6 +20,7 @@ mod socket;
 mod testing_will_be_removed;
 
 pub use injection::{Injection, Update};
+use parking_lot::RwLock;
 
 use std::{net::SocketAddr, sync::Arc};
 
@@ -32,7 +33,7 @@ use tokio::{
 };
 use tracing::info;
 
-use crate::{connections::meta::Meta, packets::Parser};
+use crate::{connections::meta::Meta, packets::Parser, scripts::ScriptStorage};
 
 use socket::{get_stream, stream_to_target_addr};
 
@@ -69,6 +70,7 @@ impl Connector {
         // One parser is shared by both directions: the state machine and the
         // compression threshold are per-connection, not per-direction.
         let parser = Arc::new(Parser::new());
+        let script_storage = Arc::new(RwLock::new(ScriptStorage::default()));
         tokio::select! {
             // Clone doesn't cost anything atp because it's an Arc
             res = relay::connection_side(
@@ -76,14 +78,16 @@ impl Connector {
                 self.local_addr,
                 parser.clone(),
                 Meta::new(),
-                Channel::new(source_rx, source_tx, s2t_tx)
+                Channel::new(source_rx, source_tx, s2t_tx),
+                script_storage.clone()
             ) => res,
             res = relay::connection_side(
                 Stream::new(target_stream_reader, stream_writer),
                 self.local_addr,
                 parser,
                 Meta::new(),
-                Channel::new(target_rx, target_tx, t2s_tx)
+                Channel::new(target_rx, target_tx, t2s_tx),
+                script_storage
             ) => res,
         }
     }
